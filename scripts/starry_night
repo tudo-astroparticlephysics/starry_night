@@ -1,0 +1,85 @@
+#!/usr/bin/env python
+# coding: utf-8
+'''
+This script downloads images from an URL in a given time interval and calculates the cloudiness
+at various positions.
+
+Usage:
+    starry_night.py [options]
+
+Options
+    --version     Show version.
+    
+'''
+from __future__ import print_function
+import os
+import time
+from threading import Event
+import logging
+from docopt import docopt
+from collections import deque
+import blessings
+import pkg_resources
+
+
+__version__ = pkg_resources.require('starry_night')[0].version
+# setup logging
+logdir = os.path.join(os.environ['HOME'], '.starry_night')
+if not os.path.exists(logdir):
+    os.makedirs(logdir)
+
+log = logging.getLogger('starry_night')
+log.setLevel(logging.INFO)
+logfile_path = os.path.join(
+    logdir, 'starry_night_{:%Y-%m-%d}.log'.format(tools.night()),
+)
+logfile_handler = logging.FileHandler(filename=logfile_path)
+logfile_handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter(
+    fmt='%(asctime)s - %(levelname)s - %(name)s | %(message)s',
+    datefmt='%H:%M:%S',
+)
+formatter.converter = time.gmtime  # use utc in log
+logfile_handler.setFormatter(formatter)
+log.addHandler(logfile_handler)
+logging.getLogger('py.warnings').addHandler(logfile_handler)
+logging.captureWarnings(True)
+
+
+def main(stop_event, args):
+    term = blessings.Terminal()
+
+    print(term.red)
+    print(term.width * '=')
+    print('{{:^{}}}'.format(term.width).format(
+        'Welcome to the starry_night tool!'
+    ))
+    print(term.width * '=')
+    print(term.normal)
+
+    config = tools.read_config_file()
+
+    if args['--debug']:
+        mesg = term.red(80*'=' + '\n' + '{:^80}\n' + 80*'=')
+        print(mesg.format('DEBUG MODE - NOT FOR REGULAR USE'))
+        log.setLevel(logging.DEBUG)
+        log.debug('started shift helper in debug mode')
+
+
+    log.info('Entering main loop.')
+    while True:
+        time.sleep(10)
+
+
+if __name__ == '__main__':
+    log.info('starry_night started')
+    log.info('version: {}'.format(__version__))
+    args = docopt(
+        __doc__,
+        version=__version__,
+    )
+    try:
+        main(args)
+    except (KeyboardInterrupt, SystemExit):
+        stop_event.set()
+        log.info('Exit')
