@@ -1,7 +1,7 @@
 from distutils.core import setup
 
 setup(
-    name='starry_sky',
+    name='starry_night',
     version='0.0.1',
     description='A tool for calculating the cloudiness of the night sky based on star detection',
     url='https://bitbucket.org/solarer/starry_night',
@@ -9,10 +9,12 @@ setup(
     author_email='jan.adam@tu-dortmund.de',
     license='MIT',
     packages=[
-        'starry_sky',
+        'starry_night',
         ],
     install_requires=[
         'pandas',           # in anaconda
+        'scipy',            # in anaconda
+        'pyephem',            # in anaconda
         #'requests',         # in anaconda
         'numpy',            # in anaconda
         'matplotlib>=1.4',  # in anaconda
@@ -23,7 +25,10 @@ setup(
         #'blessings',
         'docopt',           # in anaconda
     ],
-    #scripts=['scripts/shift_helper', 'scripts/qla_bot'],
-    #package_data={'fact_shift_helper.tools': ['config.gpg']},
+    test_suite='nose.collector',
+    tests_require=['nose'],
+    scripts=['scripts/starry_night'],
+
+    package_data={'starry_night': ['data/*.csv']},
     zip_safe=False
 )

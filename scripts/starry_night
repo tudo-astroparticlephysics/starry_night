@@ -1,85 +1,120 @@
 #!/usr/bin/env python
 # coding: utf-8
 '''
-This script downloads images from an URL in a given time interval and calculates the cloudiness
-at various positions.
-
 Usage:
-    starry_night.py [options]
+    starry_night
+    starry_night (online | offline <file>) [options]
 
-Options
-    --version     Show version.
-    
+Options:
+    --version       Show version.
+    --debug         debug it [default: False]
+    -f              Image file
+    -t              Image time
+    -c              Configuration file
 '''
-from __future__ import print_function
-import os
-import time
-from threading import Event
-import logging
-from docopt import docopt
-from collections import deque
-import blessings
-import pkg_resources
 
+from __future__ import print_function
+import pkg_resources
+import logging
+import os
+import sys
+import time
+from docopt import docopt
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+from starry_night import skycam
+
+print('starry_night name: {}'.format(__name__))
 
 __version__ = pkg_resources.require('starry_night')[0].version
-# setup logging
-logdir = os.path.join(os.environ['HOME'], '.starry_night')
-if not os.path.exists(logdir):
-    os.makedirs(logdir)
+directory = os.path.join(os.environ['HOME'], '.starry_night')
+if not os.path.exists(directory):
+    os.makedirs(directory)
 
+# setup logging
 log = logging.getLogger('starry_night')
-log.setLevel(logging.INFO)
+log.setLevel(logging.DEBUG)
 logfile_path = os.path.join(
-    logdir, 'starry_night_{:%Y-%m-%d}.log'.format(tools.night()),
-)
+    directory, 'starry_night.log'
+    )
+# create handler for file and console output
 logfile_handler = logging.FileHandler(filename=logfile_path)
+logstream_handler = logging.StreamHandler()
 logfile_handler.setLevel(logging.DEBUG)
+logstream_handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter(
     fmt='%(asctime)s - %(levelname)s - %(name)s | %(message)s',
     datefmt='%H:%M:%S',
 )
 formatter.converter = time.gmtime  # use utc in log
 logfile_handler.setFormatter(formatter)
+logstream_handler.setFormatter(formatter)
 log.addHandler(logfile_handler)
-logging.getLogger('py.warnings').addHandler(logfile_handler)
+log.addHandler(logstream_handler)
 logging.captureWarnings(True)
 
 
-def main(stop_event, args):
-    term = blessings.Terminal()
-
-    print(term.red)
-    print(term.width * '=')
-    print('{{:^{}}}'.format(term.width).format(
-        'Welcome to the starry_night tool!'
-    ))
-    print(term.width * '=')
-    print(term.normal)
-
-    config = tools.read_config_file()
-
-    if args['--debug']:
-        mesg = term.red(80*'=' + '\n' + '{:^80}\n' + 80*'=')
-        print(mesg.format('DEBUG MODE - NOT FOR REGULAR USE'))
-        log.setLevel(logging.DEBUG)
-        log.debug('started shift helper in debug mode')
 
 
-    log.info('Entering main loop.')
-    while True:
-        time.sleep(10)
-
-
-if __name__ == '__main__':
+def main(args):
     log.info('starry_night started')
     log.info('version: {}'.format(__version__))
+    
+    if args['--debug']:
+        print('DEBUG MODE - NOT FOR REGULAR USE')
+        log.setLevel(logging.DEBUG)
+        log.debug('started starry_night in debug mode')
+
+
+    # TODO: read config file to obtain URL and stuff
+    url = 'http://www.gtc.iac.es/multimedia/netcam/camaraAllSky.jpg'
+
+
+    if args['online']:
+        log.info('Do an offline analysis of an image file')
+        try:
+            img = skycam.downloadImg(
+                url,
+                timeout=5,
+            )
+            log.debug('Download finished')
+        except:
+            log.error('Download of image failed')
+            raise
+
+        time = datetime.utcnow()
+
+    elif args['offline']:
+        log.info('Do an offline analysis of an image file')
+        img = skycam.loadCamImage(args['file'])
+
+    # store image and additional data in dict
+    image = dict({
+            'img': img,
+            'timestamp': time,
+            })
+
+    '''
+    plt.imshow(img, cmap='Greys_r')
+    plt.colorbar()
+    plt.show()
+    '''
+
+    obs = skycam.obs_setup(time)
+    stars = skycam.star_dataframe(obs, rotation=0, altitude=10, vmag=4)
+    stars.head()
+
+
+''' Main Loop '''
+if __name__ == '__main__':
     args = docopt(
-        __doc__,
+        doc=__doc__,
         version=__version__,
-    )
+        )
     try:
         main(args)
     except (KeyboardInterrupt, SystemExit):
-        stop_event.set()
         log.info('Exit')
+    except:
+        raise
