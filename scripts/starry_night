@@ -2,15 +2,15 @@
 # coding: utf-8
 '''
 Usage:
-    starry_night
-    starry_night (online | offline <file>) [options]
+    starry_night -c <confFile> [options]
+    starry_night [(offline <image>)] [options]
 
 Options:
     --version       Show version.
     --debug         debug it [default: False]
-    -f              Image file
-    -t              Image time
-    -c              Configuration file
+    -f IMAGE        Image file
+    -t TIME         Image time
+    -c CONFIG       Configuration file
 '''
 
 from __future__ import print_function
@@ -22,6 +22,8 @@ import time
 from docopt import docopt
 import matplotlib.pyplot as plt
 from datetime import datetime
+import configparser
+from pkg_resources import resource_filename
 
 from starry_night import skycam
 from IPython import embed
@@ -68,15 +70,21 @@ def main(args):
         log.debug('started starry_night in debug mode')
 
 
+    print(args)
     # TODO: read config file to obtain URL and stuff
-    url = 'http://www.gtc.iac.es/multimedia/netcam/camaraAllSky.jpg'
+    log.debug('Parsing config file: {}'.format(args['-c']))
+    config = configparser.ConfigParser()
+    config.read(resource_filename(
+        'starry_night', '../data/{}'.format(args['-c']))
+    )
 
 
-    if args['online']:
-        log.info('Do an offline analysis of an image file')
+    # download current image from URL
+    if not args['offline']:
+        log.info('Do an online analysis of an image file')
         try:
             img = skycam.downloadImg(
-                url,
+                config['properties']['url'],
                 timeout=5,
             )
             log.debug('Download finished')
@@ -85,8 +93,8 @@ def main(args):
             raise
 
         time = datetime.utcnow()
-
-    elif args['offline']:
+    # use the image provided by the user
+    else:
         log.info('Do an offline analysis of an image file')
         img = skycam.loadCamImage(args['file'])
 
@@ -102,6 +110,8 @@ def main(args):
     stars, planets, moon = skycam.star_planets_moon_dataframe(obs, rotation=0, altitude=10, vmag=4)
 
     stars['x'], stars['y'] = skycam.horizontal2image(stars.azimuth, stars.altitude, radius=300, zenith_x=320, zenith_y=240)
+    planets['x'], planets['y'] = skycam.horizontal2image(planets.azimuth, planets.altitude, radius=300, zenith_x=320, zenith_y=240)
+    moon['x'], moon['y'] = skycam.horizontal2image(moon['azimuth'], moon['altitude'], radius=300, zenith_x=320, zenith_y=240)
 
     fig = plt.figure()
     ax = fig.add_subplot(111)

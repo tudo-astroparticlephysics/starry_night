@@ -14,7 +14,7 @@ from datetime import datetime
 from time import sleep
 
 from configparser import RawConfigParser
-from pkg_resources import resource_string, resource_filename
+from pkg_resources import resource_filename
 from os.path import join
 import requests
 import logging
@@ -241,8 +241,8 @@ def star_planets_moon_dataframe(observer, rotation, altitude=20, vmag=6):
     moonData = {
         'date' : str(observer.date),
         'moonPhase' : moon.moon_phase,
-        'moonZenith' : 90 - moon.alt,
-        'moonAz' : moon.az,
+        'altitude' : np.deg2rad(moon.alt),
+        'azimuth' : np.deg2rad(moon.az),
     }
 
     # calculate angle to moon
