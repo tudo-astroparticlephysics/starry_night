@@ -14,13 +14,14 @@ from datetime import datetime
 from time import sleep
 
 from configparser import RawConfigParser
-from pkg_resources import resource_string
+from pkg_resources import resource_string, resource_filename
 from os.path import join
 import requests
 import logging
 
 import re
 from io import BytesIO
+from IPython import embed
 
 
 def downloadImg(url, *args, **kwargs):
@@ -76,18 +77,20 @@ def run():
 
         sleep(wait)
 
-def theta2r(theta, radius):
+def theta2r(theta, radius, how='lin'):
     '''
-    convert angle to the optical axis to distance to the camera
-    center in pixels
+    convert angle to the optical axis into pixel distance to the camera
+    center
 
-    assumes equisolid angle projection function (Sigma 4.5mm f3.5)
+    assumes linear angle projection function or equisolid angle projection function (Sigma 4.5mm f3.5)
     '''
+    if how is 'lin':
+        return radius / (np.pi/2) * theta
+    else:
+        return 2/np.sqrt(2) * radius * np.sin(theta/2)
 
-    return 2/np.sqrt(2) * radius * np.sin(theta / 2)
 
-
-def horizontal2image(az, alt, radius, zenith_x, zenith_y):
+def horizontal2image(az, alt, radius, zenith_x, zenith_y, how='lin'):
     '''
     convert azimuth and altitude to pixel_x, pixel_y
 
@@ -112,8 +115,8 @@ def horizontal2image(az, alt, radius, zenith_x, zenith_y):
         y cordinate in pixels for the given az, alt
     '''
 
-    x = zenith_x + theta2r(np.pi/2 - alt, radius) * np.cos(az)
-    y = zenith_y + theta2r(np.pi/2 - alt, radius) * np.sin(az)
+    x = zenith_x + theta2r(np.pi/2 - alt, radius, how) * np.cos(az)
+    y = zenith_y + theta2r(np.pi/2 - alt, radius, how) * np.sin(az)
     return x, y
 
 
@@ -167,26 +170,32 @@ def equatorial2horizontal(ra, dec, observer, rotation=0):
 
 
 
-def star_dataframe(observer, rotation, altitude=20, vmag=6):
+def star_planets_moon_dataframe(observer, rotation, altitude=20, vmag=6):
     '''
     Read in the star catalog, add the planets from ephem and calculate
     horizontal coordinates for the stars.
     Remove stars that do not fulfill the requirements.
     '''
-    #open(resource_filename('data', 'data.txt'), 'rb')
-    print(resource_string('data', 'starCatalogue.csv'))
+    log = logging.getLogger(__name__)
+    
+    log.debug('Loading stars')
+    catalogue = resource_filename('starry_night', '../data/asu.tsv')
     stars = pd.read_csv(
-        'asu.tsv',
-        #'./hipparcos_vmag10.csv',
+        catalogue,
         sep=';',
         comment='#',
-        skipinitialspace=True,
+        header=0,
+        skipinitialspace=False,
+        index_col=4,
     )
+    stars = stars.convert_objects(convert_numeric=True)
 
     # transform degrees to radians
     stars.ra = np.deg2rad(stars.ra)
     stars.dec = np.deg2rad(stars.dec)
 
+    log.debug('Loading planets')
+    planets = pd.DataFrame()
     # add the planets
     sol_objects = [
         ephem.Mercury(),
@@ -207,18 +216,26 @@ def star_dataframe(observer, rotation, altitude=20, vmag=6):
             'gLon': float(galactic.lon)/np.pi*180,
             'gLat': float(galactic.lat)/np.pi*180,
             'vmag': float(sol_object.mag),
+            'name': sol_object.name,
         }
-        stars = stars.append(data, ignore_index=True)
+        planets = planets.append(data, ignore_index=True)
+    planets.set_index('name', inplace=True)
 
     stars['azimuth'], stars['altitude'] = equatorial2horizontal(
         stars.ra, stars.dec, observer, rotation=rotation,
     )
+    planets['azimuth'], planets['altitude'] = equatorial2horizontal(
+        planets.ra, planets.dec, observer, rotation=rotation,
+    )
 
-    # remove stars that are not within the limits
+    # remove stars and planets that are not within the limits
     stars = stars.query('altitude > {}'.format(np.deg2rad(altitude)))
+    planets = planets.query('altitude > {}'.format(np.deg2rad(altitude)))
     stars = stars.query('vmag < {}'.format(vmag))
+    planets = planets.query('vmag < {}'.format(vmag))
 
     # include moon data
+    log.debug('Loading moon')
     moon = ephem.Moon()
     moon.compute(observer)
     moonData = {
@@ -232,7 +249,10 @@ def star_dataframe(observer, rotation, altitude=20, vmag=6):
     stars['angleToMoon'] = stars.apply(lambda x : np.arccos(np.sin(x.altitude)*
         np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
         np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
-    return stars, moonData
+    planets['angleToMoon'] = planets.apply(lambda x : np.arccos(np.sin(x.altitude)*
+        np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
+        np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
+    return stars, planets, moonData
 
 def findLocalMaxX(img, x, y, distance):
     '''

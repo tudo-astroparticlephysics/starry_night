@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 from starry_night import skycam
+from IPython import embed
 
 print('starry_night name: {}'.format(__name__))
 
@@ -95,15 +96,23 @@ def main(args):
             'timestamp': time,
             })
 
-    '''
-    plt.imshow(img, cmap='Greys_r')
-    plt.colorbar()
-    plt.show()
-    '''
-
+    log.debug('Creating Observer')
     obs = skycam.obs_setup(time)
-    stars = skycam.star_dataframe(obs, rotation=0, altitude=10, vmag=4)
-    stars.head()
+    log.debug('Parsing Catalogue')
+    stars, planets, moon = skycam.star_planets_moon_dataframe(obs, rotation=0, altitude=10, vmag=4)
+
+    stars['x'], stars['y'] = skycam.horizontal2image(stars.azimuth, stars.altitude, radius=300, zenith_x=320, zenith_y=240)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.imshow(img, cmap='Greys_r')
+    stars.plot.scatter(x='x', y='y', ax=ax, grid=True)
+    #plt.colorbar()
+    plt.show()
+
+
+
+
 
 
 ''' Main Loop '''

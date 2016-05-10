@@ -29,6 +29,6 @@ setup(
     tests_require=['nose'],
     scripts=['scripts/starry_night'],
 
-    package_data={'starry_night': ['data/*.csv']},
+    package_data={'starry_night': ['data/asu.tsv']},
     zip_safe=False
 )
