@@ -84,13 +84,15 @@ def theta2r(theta, radius, how='lin'):
 
     assumes linear angle projection function or equisolid angle projection function (Sigma 4.5mm f3.5)
     '''
-    if how is 'lin':
+    if how == 'lin':
+        print('lin:{}'.format(theta))
         return radius / (np.pi/2) * theta
     else:
+        print('nolin')
         return 2/np.sqrt(2) * radius * np.sin(theta/2)
 
 
-def horizontal2image(az, alt, radius, zenith_x, zenith_y, how='lin'):
+def horizontal2image(az, alt, cam):
     '''
     convert azimuth and altitude to pixel_x, pixel_y
 
@@ -100,12 +102,8 @@ def horizontal2image(az, alt, radius, zenith_x, zenith_y, how='lin'):
         the azimuth angle in radians
     alt : float or array-like
         the altitude angle in radians
-    radius : float
-        distance from zenith to horizon in pixels
-    zenith_x : float
-        x coordinate of the zenith in pixels
-    zenith_y : float
-        y  coordinate of the zenith in pixels
+    cam: dictionary
+        contains zenith position, radius
 
     Returns
     -------
@@ -115,8 +113,17 @@ def horizontal2image(az, alt, radius, zenith_x, zenith_y, how='lin'):
         y cordinate in pixels for the given az, alt
     '''
 
-    x = zenith_x + theta2r(np.pi/2 - alt, radius, how) * np.cos(az)
-    y = zenith_y + theta2r(np.pi/2 - alt, radius, how) * np.sin(az)
+    try:
+        x = np.float(cam['zenith_x']) + theta2r(np.pi/2 - alt,
+                np.float(cam['radius']),
+                how=cam['angleprojection']
+                ) * np.cos(az+np.float(cam['azimuthoffset']))
+        y = np.float(cam['zenith_y']) - theta2r(np.pi/2 - alt,
+                np.float(cam['radius']),
+                how=cam['angleprojection']
+                ) * np.sin(az+np.float(cam['azimuthoffset']))
+    except:
+        raise
     return x, y
 
 
@@ -131,7 +138,7 @@ def obs_setup(date):
     return obs
 
 
-def equatorial2horizontal(ra, dec, observer, rotation=0):
+def equatorial2horizontal(ra, dec, observer):
     '''
     Transforms from right ascension, declination to azimuth, altitude for
     the given observer.
@@ -164,13 +171,13 @@ def equatorial2horizontal(ra, dec, observer, rotation=0):
     az = arctan2(sin(h), cos(h) * sin(obs_lat) - tan(dec)*cos(obs_lat))
 
     # correction for camera orientation
-    az = np.mod(az + rotation, 2 * pi)
+    az = np.mod(az+pi, 2*pi)
     return az, alt
 
 
 
 
-def star_planets_moon_dataframe(observer, rotation, altitude=20, vmag=6):
+def star_planets_moon_sun_dataframes(observer, cam):
     '''
     Read in the star catalog, add the planets from ephem and calculate
     horizontal coordinates for the stars.
@@ -222,24 +229,27 @@ def star_planets_moon_dataframe(observer, rotation, altitude=20, vmag=6):
     planets.set_index('name', inplace=True)
 
     stars['azimuth'], stars['altitude'] = equatorial2horizontal(
-        stars.ra, stars.dec, observer, rotation=rotation,
+        stars.ra, stars.dec, observer,
     )
     planets['azimuth'], planets['altitude'] = equatorial2horizontal(
-        planets.ra, planets.dec, observer, rotation=rotation,
+        planets.ra, planets.dec, observer,
     )
 
     # remove stars and planets that are not within the limits
-    stars = stars.query('altitude > {}'.format(np.deg2rad(altitude)))
-    planets = planets.query('altitude > {}'.format(np.deg2rad(altitude)))
-    stars = stars.query('vmag < {}'.format(vmag))
-    planets = planets.query('vmag < {}'.format(vmag))
+    try:
+        stars = stars.query('altitude > {}'.format(np.deg2rad(90 - float(cam['openingangle']))))
+        planets = planets.query('altitude > {}'.format(np.deg2rad(90 - float(cam['openingangle']))))
+        stars = stars.query('vmag < {}'.format(cam['vmaglimit']))
+        planets = planets.query('vmag < {}'.format(cam['vmaglimit']))
+    except:
+        log.error('Using altitude or vmag limit failed!')
+        raise
 
     # include moon data
     log.debug('Loading moon')
     moon = ephem.Moon()
     moon.compute(observer)
     moonData = {
-        'date' : str(observer.date),
         'moonPhase' : moon.moon_phase,
         'altitude' : np.deg2rad(moon.alt),
         'azimuth' : np.deg2rad(moon.az),
@@ -249,10 +259,19 @@ def star_planets_moon_dataframe(observer, rotation, altitude=20, vmag=6):
     stars['angleToMoon'] = stars.apply(lambda x : np.arccos(np.sin(x.altitude)*
         np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
         np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
-    planets['angleToMoon'] = planets.apply(lambda x : np.arccos(np.sin(x.altitude)*
-        np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
-        np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
-    return stars, planets, moonData
+    if not planets.empty:
+        planets['angleToMoon'] = planets.apply(lambda x : np.arccos(np.sin(x.altitude)*
+            np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
+            np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
+
+
+    sun = ephem.Sun()
+    sun.compute(observer)
+    sunData = {
+        'altitude' : np.deg2rad(sun.alt),
+        'azimuth' : np.deg2rad(sun.az),
+    }
+    return stars, planets, moonData, sunData
 
 def findLocalMaxX(img, x, y, distance):
     '''
@@ -277,16 +296,30 @@ def findLocalMaxValue(img, xArr, yArr, distance):
     return out
 
 
-def loadCamImage(filename):
+def loadImageAndTime(filename, fmt=None):
     '''Open an image file and return its content as a numpy array'''
+    log = logging.getLogger(__name__)
+    #TODO: read image time from mat and fits file
     if filename.endswith('.mat'):
         data = matlab.loadmat(filename)
-        return data[dictEntry]
+        img = data[dictEntry]
+        if fmt is None:
+            time = datetime.strptime(filename, fmt)
     elif filename.endswith('.fits'):
         hdulist = fits.open(filename)
-        return hdulist[0].data
+        img = hdulist[0].data
+        if fmt is None:
+            time = datetime.strptime(filename, fmt)
     else:
-        return misc.imread(filename, mode='L')
+        try:
+            img = imread(filename, mode='L')
+            time = datetime.strptime(filename, fmt)
+        except:
+            log.error('Unable to open Image. Filetype unknown?')
+            raise
+    return img, time
+
+    
     
 def loadImageTime(filename):
     # assuming that the filename only contains numbers of timestamp

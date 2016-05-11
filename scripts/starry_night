@@ -11,6 +11,7 @@ Options:
     -f IMAGE        Image file
     -t TIME         Image time
     -c CONFIG       Configuration file
+    -v              Visual output
 '''
 
 from __future__ import print_function
@@ -21,7 +22,7 @@ import sys
 import time
 from docopt import docopt
 import matplotlib.pyplot as plt
-from datetime import datetime
+from datetime import datetime, timedelta
 import configparser
 from pkg_resources import resource_filename
 
@@ -73,14 +74,14 @@ def main(args):
     print(args)
     # TODO: read config file to obtain URL and stuff
     log.debug('Parsing config file: {}'.format(args['-c']))
-    config = configparser.ConfigParser()
+    config = configparser.RawConfigParser()
     config.read(resource_filename(
         'starry_night', '../data/{}'.format(args['-c']))
     )
 
 
     # download current image from URL
-    if not args['offline']:
+    if args['-f'] is None:
         log.info('Do an online analysis of an image file')
         try:
             img = skycam.downloadImg(
@@ -96,29 +97,46 @@ def main(args):
     # use the image provided by the user
     else:
         log.info('Do an offline analysis of an image file')
-        img = skycam.loadCamImage(args['file'])
+        img, time = skycam.loadImageAndTime(args['-f'], fmt=config['image']['timestamp'])
+        time = time + timedelta(minutes=-5)
+        log.debug('Opened image: {}'.format(args['-f']))
+        
 
     # store image and additional data in dict
     image = dict({
             'img': img,
             'timestamp': time,
             })
+    log.debug('Image time: {}'.format(time))
 
     log.debug('Creating Observer')
     obs = skycam.obs_setup(time)
     log.debug('Parsing Catalogue')
-    stars, planets, moon = skycam.star_planets_moon_dataframe(obs, rotation=0, altitude=10, vmag=4)
+    stars, planets, moon, sun = skycam.star_planets_moon_sun_dataframes(
+            obs, 
+            cam=config['image'],
+            )
 
-    stars['x'], stars['y'] = skycam.horizontal2image(stars.azimuth, stars.altitude, radius=300, zenith_x=320, zenith_y=240)
-    planets['x'], planets['y'] = skycam.horizontal2image(planets.azimuth, planets.altitude, radius=300, zenith_x=320, zenith_y=240)
-    moon['x'], moon['y'] = skycam.horizontal2image(moon['azimuth'], moon['altitude'], radius=300, zenith_x=320, zenith_y=240)
+    stars['x'], stars['y'] = skycam.horizontal2image(stars.azimuth, stars.altitude, cam=config['image'])
+    planets['x'], planets['y'] = skycam.horizontal2image(planets.azimuth, planets.altitude, cam=config['image'])
+    moon['x'], moon['y'] = skycam.horizontal2image(moon['azimuth'], moon['altitude'], cam=config['image'])
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.imshow(img, cmap='Greys_r')
-    stars.plot.scatter(x='x', y='y', ax=ax, grid=True)
-    #plt.colorbar()
-    plt.show()
+
+    x, y = skycam.horizontal2image(
+            (359.5)/180*3.14159,29.3/180*3.14159, #sun['azimuth'],
+            #sun['altitude'],
+            cam=config['image'],
+            )
+    print(x,y)
+    if args['-v']:
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.imshow(img, cmap='Greys_r', interpolation='none')
+        stars.plot.scatter(x='x', y='y', ax=ax, marker='x', grid=True, label='stars')
+        ax.scatter(x,y, color='red', marker='+', label='sun')
+        plt.legend()
+        #plt.colorbar()
+        plt.show()
 
 
 
