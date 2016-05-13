@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 import pandas as pd
 import ephem
+import sys
 
 from scipy.io import matlab
 from skimage.io import imread
@@ -66,7 +67,6 @@ def run():
                 except (KeyboardInterrupt, SystemExit):
                     exit(0)
                 except Exception as e:
-                    print('Download failed with error: \n\t{}'.format(e))
                     log.error('Download failed with error: \n\t{}'.format(e))
                     sleep(10)
                     continue
@@ -85,10 +85,8 @@ def theta2r(theta, radius, how='lin'):
     assumes linear angle projection function or equisolid angle projection function (Sigma 4.5mm f3.5)
     '''
     if how == 'lin':
-        print('lin:{}'.format(theta))
         return radius / (np.pi/2) * theta
     else:
-        print('nolin')
         return 2/np.sqrt(2) * radius * np.sin(theta/2)
 
 
@@ -296,8 +294,16 @@ def findLocalMaxValue(img, xArr, yArr, distance):
     return out
 
 
-def loadImageAndTime(filename, fmt=None):
-    '''Open an image file and return its content as a numpy array'''
+def loadImageAndTime(filename, crop=None, fmt=None):
+    '''
+    Open an image file and return its content as a numpy array.
+    
+    input:
+        filename: full or relativ path to image
+        crop: crop image to a circle with center and radius
+        fmt: format timestring like 'gtc_allskyimage_%Y%m%d_%H%M%S.jpg'
+            used for parsing the date from filename
+    '''
     log = logging.getLogger(__name__)
     #TODO: read image time from mat and fits file
     if filename.endswith('.mat'):
@@ -312,11 +318,22 @@ def loadImageAndTime(filename, fmt=None):
             time = datetime.strptime(filename, fmt)
     else:
         try:
-            img = imread(filename, mode='L')
+            img = imread(filename, mode='L', as_grey=True)
             time = datetime.strptime(filename, fmt)
-        except:
-            log.error('Unable to open Image. Filetype unknown?')
+        except (FileNotFoundError, OSError):
+            log.error('File {} not found. Or filetype invalid'.format(filename))
             raise
+        except ValueError:
+            log.error('Filename {} does not match {}'.format(filename, fmt))
+            raise
+    if crop is not None:
+        x, y, r =  map(int(), crop['crop_x'].split(',')), crop['crop_y'], crop['crop_radius']
+        print(x)
+        #re.split('\\s*,\\s*', crop['crop_x']))
+        nrows, ncols = img.shape
+        row, col = np.ogrid[:nrows, :ncols]
+        outer_disk_mask = ((row - y)**2 + (col - x)**2 > r**2)
+        img[outer_disk_mask] = 0
     return img, time
 
     

@@ -2,13 +2,14 @@
 # coding: utf-8
 '''
 Usage:
-    starry_night -c <confFile> [options]
-    starry_night [(offline <image>)] [options]
+    starry_night -c <confFile> [-f <image>... | -d <directory> | -l <posFile>] [options]
 
 Options:
     --version       Show version.
     --debug         debug it [default: False]
-    -f IMAGE        Image file
+    -f IMAGE        Image file(s)
+    -d DIRECTORY    Directory that contains image files. (Recursive!)
+    -l POSFILE      File that contains Positions and timestamps to analyse
     -t TIME         Image time
     -c CONFIG       Configuration file
     -v              Visual output
@@ -23,13 +24,14 @@ import time
 from docopt import docopt
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import numpy as np
 import configparser
 from pkg_resources import resource_filename
+import skimage.filters
 
 from starry_night import skycam
 from IPython import embed
 
-print('starry_night name: {}'.format(__name__))
 
 __version__ = pkg_resources.require('starry_night')[0].version
 directory = os.path.join(os.environ['HOME'], '.starry_night')
@@ -66,7 +68,7 @@ def main(args):
     log.info('version: {}'.format(__version__))
     
     if args['--debug']:
-        print('DEBUG MODE - NOT FOR REGULAR USE')
+        log.info('DEBUG MODE - NOT FOR REGULAR USE')
         log.setLevel(logging.DEBUG)
         log.debug('started starry_night in debug mode')
 
@@ -95,17 +97,21 @@ def main(args):
 
         time = datetime.utcnow()
     # use the image provided by the user
-    else:
+    elif len(args['-f']) == 1:
         log.info('Do an offline analysis of an image file')
-        img, time = skycam.loadImageAndTime(args['-f'], fmt=config['image']['timestamp'])
+        img, time = skycam.loadImageAndTime(args['-f'][0], crop=config['crop'], fmt=config['image']['timestamp'])
         time = time + timedelta(minutes=-5)
         log.debug('Opened image: {}'.format(args['-f']))
+    else:
+        log.error('Can not process a list of files yet')
+        sys.exit(1)
         
 
     # store image and additional data in dict
     image = dict({
             'img': img,
             'timestamp': time,
+            'log': np.zeros(1),
             })
     log.debug('Image time: {}'.format(time))
 
@@ -117,23 +123,22 @@ def main(args):
             cam=config['image'],
             )
 
+    # calculate x and y position
     stars['x'], stars['y'] = skycam.horizontal2image(stars.azimuth, stars.altitude, cam=config['image'])
     planets['x'], planets['y'] = skycam.horizontal2image(planets.azimuth, planets.altitude, cam=config['image'])
     moon['x'], moon['y'] = skycam.horizontal2image(moon['azimuth'], moon['altitude'], cam=config['image'])
 
+    print(img)
 
-    x, y = skycam.horizontal2image(
-            (359.5)/180*3.14159,29.3/180*3.14159, #sun['azimuth'],
-            #sun['altitude'],
-            cam=config['image'],
-            )
-    print(x,y)
+    #if args['--log']:
+    #    image['log'] = skimage.filter
+    lap= skimage.filters.laplace(img, ksize=3)
+
     if args['-v']:
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.imshow(img, cmap='Greys_r', interpolation='none')
-        stars.plot.scatter(x='x', y='y', ax=ax, marker='x', grid=True, label='stars')
-        ax.scatter(x,y, color='red', marker='+', label='sun')
+        #stars.plot.scatter(x='x', y='y', ax=ax, marker='x', grid=True, label='stars')
         plt.legend()
         #plt.colorbar()
         plt.show()
