@@ -262,7 +262,6 @@ def star_planets_moon_sun_dataframes(observer, cam):
             np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
             np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
 
-
     sun = ephem.Sun()
     sun.compute(observer)
     sunData = {
@@ -327,13 +326,22 @@ def loadImageAndTime(filename, crop=None, fmt=None):
             log.error('Filename {} does not match {}'.format(filename, fmt))
             raise
     if crop is not None:
-        x, y, r =  map(int(), crop['crop_x'].split(',')), crop['crop_y'], crop['crop_radius']
-        print(x)
-        #re.split('\\s*,\\s*', crop['crop_x']))
-        nrows, ncols = img.shape
-        row, col = np.ogrid[:nrows, :ncols]
-        outer_disk_mask = ((row - y)**2 + (col - x)**2 > r**2)
-        img[outer_disk_mask] = 0
+        try:
+            x = re.split('\\s*,\\s*', crop['crop_x'])
+            y = re.split('\\s*,\\s*', crop['crop_y'])
+            r = re.split('\\s*,\\s*', crop['crop_radius'])
+            inside = re.split('\\s*,\\s*', crop['crop_deleteinside'])
+            nrows, ncols = img.shape
+            row, col = np.ogrid[:nrows, :ncols]
+            for x,y,r,inside in zip(x,y,r,inside):
+                if inside == '0':
+                    disk_mask = ((row - int(y))**2 + (col - int(x))**2 > int(r)**2)
+                else:
+                    disk_mask = ((row - int(y))**2 + (col - int(x))**2 < int(r)**2)
+                img[disk_mask] = 0
+        except:
+            log.error('Cropping failed, maybe there is a typing error in the config file?')
+            raise
     return img, time
 
     

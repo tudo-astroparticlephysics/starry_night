@@ -128,7 +128,6 @@ def main(args):
     planets['x'], planets['y'] = skycam.horizontal2image(planets.azimuth, planets.altitude, cam=config['image'])
     moon['x'], moon['y'] = skycam.horizontal2image(moon['azimuth'], moon['altitude'], cam=config['image'])
 
-    print(img)
 
     #if args['--log']:
     #    image['log'] = skimage.filter
