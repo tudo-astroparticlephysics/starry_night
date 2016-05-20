@@ -25,6 +25,7 @@ from docopt import docopt
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import numpy as np
+import pandas as pd
 import configparser
 from pkg_resources import resource_filename
 import skimage.filters
@@ -107,6 +108,9 @@ def main(args):
         sys.exit(1)
         
 
+    # create cropping array to mask unneccessary image regions.
+    crop_mask = skycam.crop_mask(img, config['crop'])
+
     # store image and additional data in dict
     image = dict({
             'img': img,
@@ -129,19 +133,55 @@ def main(args):
     moon['x'], moon['y'] = skycam.horizontal2image(moon['azimuth'], moon['altitude'], cam=config['image'])
 
 
-    #if args['--log']:
-    #    image['log'] = skimage.filter
-    lap= skimage.filters.laplace(img, ksize=3)
+
+    grad = skimage.filters.sobel(img).clip(min=0)
+    grad[crop_mask] = 0
+    gauss = skimage.filters.gaussian(img, sigma=1)
+    lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+    lap[crop_mask] = 0
+
+
+    stars['response'] = stars.apply(lambda s : skycam.findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
+    stars['response2'] = stars.apply(lambda s : skycam.findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
+    stars = pd.concat([stars, stars.apply(
+            lambda s : skycam.findLocalMaxPos(grad, s.x, s.y, 2),
+            axis=1)],axis=1)
+    stars['visible'] = stars.response > 0.05
+    embed()
+
+
+
+
+    fig = plt.figure()
+    ax = fig.add_subplot(121)
+    stars.query('visible == True').plot.scatter(ax=ax, x='x', y='y', color='green')
+    stars.query('visible == False').plot.scatter(ax=ax, x='x', y='y', color='red')
+    stars.plot.scatter(x='vmag', y='response2', color='red', grid=True)
+    plt.show()
 
     if args['-v']:
+        '''
         fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.imshow(img, cmap='Greys_r', interpolation='none')
-        #stars.plot.scatter(x='x', y='y', ax=ax, marker='x', grid=True, label='stars')
+        ax = fig.add_subplot(121)
+        ax.imshow(-lap/0.05, cmap='Greys_r', interpolation='none')
+        ax2 = fig.add_subplot(122)
+        ax2.imshow(-grad, cmap='Greys_r', interpolation='none')
         plt.legend()
-        #plt.colorbar()
-        plt.show()
+        fig = plt.figure()
+        ax3 = fig.add_subplot(121)
+        ax3.imshow(img, cmap='Greys_r', interpolation='none')
+        ax4 = fig.add_subplot(122)
+        ax4.imshow(img, cmap='Greys_r', interpolation='none')
+        ax.grid()
+        ax2.grid()
+        ax3.grid()
+        ax4.grid()
 
+        fig = plt.figure()
+        plt.hist(lap.flatten(), bins=100, range=(0,0.05))
+        plt.show()
+        '''
+        pass
 
 
 

@@ -270,28 +270,54 @@ def star_planets_moon_sun_dataframes(observer, cam):
     }
     return stars, planets, moonData, sunData
 
-def findLocalMaxX(img, x, y, distance):
+def findLocalMaxValue(img, x, y, radius):
     '''
-    ' return x position of brightest pixel within distance
+    ' Returns value of brightest pixel within radius
     '''
-    maxPos = np.argmax(img[x-distance:x+distance+1, y-distance:y+distance+1])
-    xDelta = maxPos%(2*distance+1)-distance
-    return int(x+xDelta)
+    try:
+        x = int(x)
+        y = int(y)
+    except:
+        x = x.astype(int)
+        y = y.astype(int)
+    
+    # get interval border
+    x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
+    y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
+    radius = x_interval[1]-x_interval[0] , y_interval[1]-y_interval[0]
 
-def findLocalMaxY(img, x, y, distance):
-    '''
-    ' return x position of brightest pixel within distance
-    '''
-    maxPos = np.argmax(img[x-distance:x+distance+1, y-distance:y+distance+1])
-    yDelta = maxPos//(2*distance+1)-distance
-    return int(y+yDelta)
+    # do subselection
+    subImg = img[y_interval[0]:y_interval[1] , x_interval[0]:x_interval[1]]
+    try:
+        return np.nanmax(subImg.flatten())
+    except RuntimeWarning:
+        print('NAN')
+        return 0
 
-def findLocalMaxValue(img, xArr, yArr, distance):
-    out = list()
-    for x,y in zip(xArr,yArr):
-        out.append(np.amax(img[x-distance:x+distance+1, y-distance:y+distance+1]))
-    return out
-
+def findLocalMaxPos(img, x, y, radius):
+    '''
+    ' Returns x and y position of brightest pixel within radius
+    ' If all pixel have equal brightness, current position is returned
+    '''
+    try:
+        x = int(x)
+        y = int(y)
+    except:
+        x = x.astype(int)
+        y = y.astype(int)
+    # get interval border
+    x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
+    y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
+    radius = x_interval[1]-x_interval[0] , y_interval[1]-y_interval[0]
+    subImg = img[y_interval[0]:y_interval[1] , x_interval[0]:x_interval[1]]
+    if np.max(subImg) != np.min(subImg):
+        try:
+            maxPos = np.nanargmax(subImg)
+            x = (maxPos%radius[0])+x_interval[0]
+            y = (maxPos//radius[0])+y_interval[0]
+        except ValueError:
+            return pd.Series({'maxX':0, 'maxY':0})
+    return pd.Series({'maxX':int(x), 'maxY':int(y)})
 
 def loadImageAndTime(filename, crop=None, fmt=None):
     '''
@@ -325,6 +351,14 @@ def loadImageAndTime(filename, crop=None, fmt=None):
         except ValueError:
             log.error('Filename {} does not match {}'.format(filename, fmt))
             raise
+    return img, time
+
+    
+def crop_mask(img, crop):
+    '''
+    crop is dictionary with cropping information
+    returns a boolean array in size of img: False got cropped; True not cropped 
+    '''
     if crop is not None:
         try:
             x = re.split('\\s*,\\s*', crop['crop_x'])
@@ -333,18 +367,16 @@ def loadImageAndTime(filename, crop=None, fmt=None):
             inside = re.split('\\s*,\\s*', crop['crop_deleteinside'])
             nrows, ncols = img.shape
             row, col = np.ogrid[:nrows, :ncols]
+            disk_mask = np.full((nrows, ncols), False, dtype=bool)
             for x,y,r,inside in zip(x,y,r,inside):
                 if inside == '0':
-                    disk_mask = ((row - int(y))**2 + (col - int(x))**2 > int(r)**2)
+                    disk_mask = disk_mask | ((row - int(y))**2 + (col - int(x))**2 > int(r)**2)
                 else:
-                    disk_mask = ((row - int(y))**2 + (col - int(x))**2 < int(r)**2)
-                img[disk_mask] = 0
+                    disk_mask = disk_mask | ((row - int(y))**2 + (col - int(x))**2 < int(r)**2)
         except:
             log.error('Cropping failed, maybe there is a typing error in the config file?')
             raise
-    return img, time
-
-    
+        return disk_mask
     
 def loadImageTime(filename):
     # assuming that the filename only contains numbers of timestamp
