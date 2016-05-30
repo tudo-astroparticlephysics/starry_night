@@ -347,10 +347,10 @@ def loadImageAndTime(filename, crop=None, fmt=None):
             time = datetime.strptime(filename, fmt)
         except (FileNotFoundError, OSError):
             log.error('File {} not found. Or filetype invalid'.format(filename))
-            raise
+            sys.exit(1)
         except ValueError:
             log.error('Filename {} does not match {}'.format(filename, fmt))
-            raise
+            sys.exit(1)
     return img, time
 
     
@@ -407,3 +407,25 @@ def dispHist(image):
     '''
     plt.hist(image[~np.isnan(image)].ravel(), bins=100, range=(-150,2000))
     plt.show()
+
+def isInRange(position, star, rng):
+    if rng < 0:
+        raise ValueError
+    if 'x' in position.keys():
+        return ((position.x - star.x)**2 + (position.y - star.y)**2 <= rng**2)
+    else:
+        deltaDeg = np.acos(Math.sin(alt) * np.sin(az) +
+        np.cos(alt) * np.cos(az) * np.cos(ra1 - ra2))
+        return deltaDeg <= np.deg2(radius)
+
+
+def calc_star_percentage(position, stars, rng):
+    '''
+    Returns percentage of stars that are in within range of position
+    
+    Position is dictionary and can contain alt,az or x,y
+    Range is degree or pixel radius depending on whether horizontal or pixel coordinates were used
+    '''
+    
+    #stars.apply(
+

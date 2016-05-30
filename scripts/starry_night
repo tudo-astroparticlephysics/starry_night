@@ -5,14 +5,16 @@ Usage:
     starry_night -c <confFile> [-f <image>... | -d <directory> | -l <posFile>] [options]
 
 Options:
-    --version       Show version.
-    --debug         debug it [default: False]
+                    If none
     -f IMAGE        Image file(s)
     -d DIRECTORY    Directory that contains image files. (Recursive!)
     -l POSFILE      File that contains Positions and timestamps to analyse
     -t TIME         Image time
     -c CONFIG       Configuration file
     -v              Visual output
+
+    --version       Show version.
+    --debug         debug it [default: False]
 '''
 
 from __future__ import print_function
@@ -128,39 +130,41 @@ def main(args):
             )
 
     # calculate x and y position
+    log.debug('Calculate x and y')
     stars['x'], stars['y'] = skycam.horizontal2image(stars.azimuth, stars.altitude, cam=config['image'])
     planets['x'], planets['y'] = skycam.horizontal2image(planets.azimuth, planets.altitude, cam=config['image'])
     moon['x'], moon['y'] = skycam.horizontal2image(moon['azimuth'], moon['altitude'], cam=config['image'])
 
 
 
+    log.debug('Apply image filters')
     grad = skimage.filters.sobel(img).clip(min=0)
     grad[crop_mask] = 0
     gauss = skimage.filters.gaussian(img, sigma=1)
     lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
     lap[crop_mask] = 0
 
-
+    
     stars['response'] = stars.apply(lambda s : skycam.findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
     stars['response2'] = stars.apply(lambda s : skycam.findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
     stars = pd.concat([stars, stars.apply(
             lambda s : skycam.findLocalMaxPos(grad, s.x, s.y, 2),
             axis=1)],axis=1)
     stars['visible'] = stars.response > 0.05
+
+
+
+
     embed()
 
-
-
-
+    if args['-v']:
+        '''
     fig = plt.figure()
     ax = fig.add_subplot(121)
     stars.query('visible == True').plot.scatter(ax=ax, x='x', y='y', color='green')
     stars.query('visible == False').plot.scatter(ax=ax, x='x', y='y', color='red')
     stars.plot.scatter(x='vmag', y='response2', color='red', grid=True)
     plt.show()
-
-    if args['-v']:
-        '''
         fig = plt.figure()
         ax = fig.add_subplot(121)
         ax.imshow(-lap/0.05, cmap='Greys_r', interpolation='none')
