@@ -177,9 +177,9 @@ def equatorial2horizontal(ra, dec, observer):
 
 def star_planets_moon_sun_dataframes(observer, cam):
     '''
-    Read in the star catalog, add the planets from ephem and calculate
-    horizontal coordinates for the stars.
-    Remove stars that do not fulfill the requirements.
+    Read the given star catalog, add planets from ephem and calculate
+    horizontal coordinates for all celestial object.
+    Remove objects that do not fulfill the needed requirements.
     '''
     log = logging.getLogger(__name__)
     
@@ -199,9 +199,8 @@ def star_planets_moon_sun_dataframes(observer, cam):
     stars.ra = np.deg2rad(stars.ra)
     stars.dec = np.deg2rad(stars.dec)
 
-    log.debug('Loading planets')
-    planets = pd.DataFrame()
     # add the planets
+    log.debug('Loading planets')
     sol_objects = [
         ephem.Mercury(),
         ephem.Venus(),
@@ -211,6 +210,7 @@ def star_planets_moon_sun_dataframes(observer, cam):
         ephem.Uranus(),
         ephem.Neptune(),
     ]
+    planets = pd.DataFrame()
     for sol_object in sol_objects:
         sol_object.compute(observer)
         equatorial = ephem.Equatorial(sol_object.g_ra, sol_object.g_dec, epoch=ephem.J2000)
@@ -408,24 +408,48 @@ def dispHist(image):
     plt.hist(image[~np.isnan(image)].ravel(), bins=100, range=(-150,2000))
     plt.show()
 
-def isInRange(position, star, rng):
+def isInRange(position, stars, rng):
     if rng < 0:
         raise ValueError
+    '''
     if 'x' in position.keys():
         return ((position.x - star.x)**2 + (position.y - star.y)**2 <= rng**2)
     else:
-        deltaDeg = np.acos(Math.sin(alt) * np.sin(az) +
-        np.cos(alt) * np.cos(az) * np.cos(ra1 - ra2))
-        return deltaDeg <= np.deg2(radius)
-
-
-def calc_star_percentage(position, stars, rng):
     '''
-    Returns percentage of stars that are in within range of position
+    dec1 = position['dec']
+    dec2 = stars['dec'].values
+    ra1 = position['ra']/12*np.pi
+    ra2 = stars['ra'].values/12*np.pi
+
+    deltaDeg = np.arccos(np.sin(dec1) * np.sin(dec2) +
+    np.cos(dec1) * np.cos(dec2) * np.cos(ra1 - ra2))
+    return deltaDeg <= np.deg2rad(rng)
+
+
+def calc_star_percentage(position, stars, rng, weight=False):
+    '''
+    Returns percentage of visible stars that are within range of position
     
-    Position is dictionary and can contain alt,az or x,y
+    Position is dictionary and can contain Ra,Dec or x,y
     Range is degree or pixel radius depending on whether horizontal or pixel coordinates were used
     '''
     
-    #stars.apply(
+    if rng < 0:
+        starsInRange = stars
+    else:
+        starsInRange = stars[isInRange(position, stars, rng)]
+
+    try:
+        if weight:
+            vis = np.sum(np.pow(100**(1/5),starsInRange.query('visible').vmag.values))
+            notVis = np.sum(np.pow(100**(1/5),starsInRange.query('~visible').vmag.values))
+            percentage = vis/(vis+notVis)
+        else:
+            percentage = len(starsInRange.query('visible').index)/len(starsInRange.index)
+    except ZeroDivisionError:
+        log = logging.getLogger(__name__)
+        log.warning('No stars in range to calc percentage. Returning -1.')
+        percentage = -1
+
+    return percentage
 

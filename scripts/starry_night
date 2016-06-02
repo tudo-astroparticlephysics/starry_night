@@ -31,6 +31,7 @@ import pandas as pd
 import configparser
 from pkg_resources import resource_filename
 import skimage.filters
+from scipy.ndimage.measurements import label
 
 from starry_night import skycam
 from IPython import embed
@@ -138,23 +139,72 @@ def main(args):
 
 
     log.debug('Apply image filters')
-    grad = skimage.filters.sobel(img).clip(min=0)
-    grad[crop_mask] = 0
+    grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
+    sobel = skimage.filters.sobel(img).clip(min=0)
     gauss = skimage.filters.gaussian(img, sigma=1)
     lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+    grad[crop_mask] = 0
+    sobel[crop_mask] = 0
     lap[crop_mask] = 0
 
+
     
+    log.debug('Calculate Filter response')
     stars['response'] = stars.apply(lambda s : skycam.findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
-    stars['response2'] = stars.apply(lambda s : skycam.findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
+    stars['response2'] = stars.apply(lambda s : skycam.findLocalMaxValue(sobel, s.x, s.y, 2), axis=1)
+    stars['response3'] = stars.apply(lambda s : skycam.findLocalMaxValue(lap, s.x, s.y, 2), axis=1)
+    '''
     stars = pd.concat([stars, stars.apply(
             lambda s : skycam.findLocalMaxPos(grad, s.x, s.y, 2),
             axis=1)],axis=1)
-    stars['visible'] = stars.response > 0.05
+    '''
 
+    gradList = list()
+    sobelList = list()
+    lapList = list()
+    gradList2 = list()
+    sobelList2 = list()
+    lapList2 = list()
 
+    response = np.logspace(-4,0,500)
+    for resp in response:
+        labeled, labelCnt = label(grad>resp)
+        stars['visible'] = stars.response > resp
+        gradList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
+        labeled, labelCnt = label(sobel>resp)
+        stars['visible'] = stars.response2 > resp
+        sobelList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
+        labeled, labelCnt = label(lap>resp)
+        stars['visible'] = stars.response3 > resp
+        lapList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
 
+    gradList = np.array(gradList)
+    sobelList = np.array(sobelList)
+    lapList = np.array(lapList)
+    gradList2 = np.array(gradList2)
+    sobelList2 = np.array(sobelList2)
+    lapList2 = np.array(lapList2)
 
+    fig = plt.figure(figsize=(19.2,10.8))
+    ax1 = fig.add_subplot(111)
+    plt.xscale('log')
+    plt.grid()
+    ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
+    ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
+    ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
+    ax1.set_ylabel('')
+    ax1.legend(loc='center left')
+
+    ax2 = ax1.twinx()
+    #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
+    #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
+    #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
+    ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
+    ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
+    ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
+    ax2.legend(loc='upper right')
+    ax2.set_ylim((0,16000))
+    plt.savefig('rateScan.pdf')
     embed()
 
     if args['-v']:
