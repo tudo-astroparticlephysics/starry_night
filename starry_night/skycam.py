@@ -293,6 +293,9 @@ def findLocalMaxValue(img, x, y, radius):
     except RuntimeWarning:
         print('NAN')
         return 0
+    except ValueError:
+        print('Star outside image')
+        return 0
 
 def findLocalMaxPos(img, x, y, radius):
     '''
@@ -421,8 +424,8 @@ def isInRange(position, stars, rng):
     ra1 = position['ra']/12*np.pi
     ra2 = stars['ra'].values/12*np.pi
 
-    deltaDeg = np.arccos(np.sin(dec1) * np.sin(dec2) +
-    np.cos(dec1) * np.cos(dec2) * np.cos(ra1 - ra2))
+    deltaDeg = 2*np.arcsin(np.sqrt(np.sin((dec1-dec2)/2)**2 + np.cos(dec1)*np.cos(dec2)*np.sin((ra1-ra2)/2)**2))
+
     return deltaDeg <= np.deg2rad(rng)
 
 
@@ -452,4 +455,43 @@ def calc_star_percentage(position, stars, rng, weight=False):
         percentage = -1
 
     return percentage
+
+def filter_catalogue(catalogue, rng):
+    '''
+    Loop through all possible pairs of stars and remove less bright star if distance is < rng
+
+    Input: Pandas DataFrame and a distance in degree
+
+    Returns: List of index that got not removed
+    '''
+    log = logging.getLogger(__name__)
+    try:
+        c = catalogue.sort_values('vmag', ascending=True)
+        reference_list = list(c[['ra','dec']].values)
+        filtered_list = list(c.index)
+    except KeyError:
+        log.error('Key not found. Please check that your catalogue is labeled correctly')
+        raise
+    
+    i1 = 0
+    while i1 < len(reference_list)-1:
+        row1 = reference_list[i1]
+        pop_index = i1 + 1
+        i2 = i1 +1
+        while i2 < len(reference_list):
+            row2 = reference_list[i2]
+            deltaDeg = np.rad2deg(2*np.arcsin(np.sqrt(np.sin((row1[1]-row2[1])/2)**2 + np.cos(row1[1])*np.cos(row2[1])*np.sin((row1[0]-row2[0])/2)**2)))
+            if deltaDeg < rng:
+                if filtered_list[pop_index] == 28358:
+                    print(row1, row2, deltaDeg)
+                if filtered_list[pop_index] == 26241:
+                    print(row1, row2, deltaDeg)
+
+                filtered_list.pop(pop_index)
+                reference_list.pop(pop_index)
+            else:
+                pop_index += 1
+                i2 += 1
+        i1 += 1
+    return filtered_list
 

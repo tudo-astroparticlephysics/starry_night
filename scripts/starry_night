@@ -130,6 +130,8 @@ def main(args):
             cam=config['image'],
             )
 
+    rem = skycam.filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
+
     # calculate x and y position
     log.debug('Calculate x and y')
     stars['x'], stars['y'] = skycam.horizontal2image(stars.azimuth, stars.altitude, cam=config['image'])
@@ -166,6 +168,14 @@ def main(args):
     sobelList2 = list()
     lapList2 = list()
 
+    ax = plt.subplot(111)
+    ax.imshow(img, cmap='gray')
+    stars.plot.scatter(ax=ax, x='x', y='y', color='red')
+    (stars.loc[rem]).plot.scatter(ax=ax, x='x', y='y', color='green')
+    plt.show()
+    embed()
+    stars.query('275 < y < 280 & 140 < x 150').head()
+    '''
     response = np.logspace(-4,0,500)
     for resp in response:
         labeled, labelCnt = label(grad>resp)
@@ -208,7 +218,6 @@ def main(args):
     embed()
 
     if args['-v']:
-        '''
     fig = plt.figure()
     ax = fig.add_subplot(121)
     stars.query('visible == True').plot.scatter(ax=ax, x='x', y='y', color='green')
@@ -234,9 +243,8 @@ def main(args):
         fig = plt.figure()
         plt.hist(lap.flatten(), bins=100, range=(0,0.05))
         plt.show()
-        '''
         pass
-
+    '''
 
 
 
