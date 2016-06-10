@@ -2,17 +2,18 @@
 # coding: utf-8
 '''
 Usage:
-    starry_night -c <confFile> [-f <image>... | -d <directory> | -l <posFile>] [options]
+    starry_night -c <confFile> [<image>... | -d <directory> | -l <posFile>] [options]
 
 Options:
                     If none
-    -f IMAGE        Image file(s)
-    -d DIRECTORY    Directory that contains image files. (Recursive!)
-    -l POSFILE      File that contains Positions and timestamps to analyse
-    -t TIME         Image time
+    <image>         Image file(s)
+    <directory>     Directory that contains image files. (Recursive!)
+    <posFile>       File that contains Positions and timestamps to analyse
+    -t TIME         Force to use this time and do not parse image name
     -c CONFIG       Configuration file
     -v              Visual output
 
+    --ratescan      Create ratescan-like plot of visibility threshold
     --version       Show version.
     --debug         debug it [default: False]
 '''
@@ -32,6 +33,7 @@ import configparser
 from pkg_resources import resource_filename
 import skimage.filters
 from scipy.ndimage.measurements import label
+from dask import delayed, compute
 
 from starry_night import skycam
 from IPython import embed
@@ -87,8 +89,8 @@ def main(args):
 
 
     # download current image from URL
-    if args['-f'] is None:
-        log.info('Do an online analysis of an image file')
+    if not args['<image>']:
+        log.info('Downloading image from {}'.format(config['properties']['url']))
         try:
             img = skycam.downloadImg(
                 config['properties']['url'],
@@ -100,152 +102,120 @@ def main(args):
             raise
 
         time = datetime.utcnow()
-    # use the image provided by the user
-    elif len(args['-f']) == 1:
-        log.info('Do an offline analysis of an image file')
-        img, time = skycam.loadImageAndTime(args['-f'][0], crop=config['crop'], fmt=config['image']['timestamp'])
-        time = time + timedelta(minutes=-5)
-        log.debug('Opened image: {}'.format(args['-f']))
-    else:
-        log.error('Can not process a list of files yet')
-        sys.exit(1)
-        
 
-    # create cropping array to mask unneccessary image regions.
-    crop_mask = skycam.crop_mask(img, config['crop'])
+
+    # use the image(s) provided by the user
+    elif len(args['<image>']) == 1:
+        log.info('Do an offline analysis of an image file')
+        img, time = skycam.loadImageAndTime(args['<image>'][0], crop=config['crop'], fmt=config['image']['timestamp'])
+        if args['-t'] is not None:
+            time = time + timedelta(minutes=float(config['properties']['timeoffset']))
+        else:
+            time = datetime(args['-t'])
+        log.info('Opened image: {} with time'.format(args['<image>'], time))
+
+    else:
+        log.info('Processing {} images.'.format(len(args['<image>'])))
+
+        output = list()
+        for f in args['<image>']:
+            a = delayed(skycam.loadImageAndTime)(f, crop=config['crop'], fmt=config['image']['timestamp'], dask_key_name='three')
+            #result = delayed(skycam.process_image)(a, config)
+            #output.append(a)
+
+        print(output)
+        result = compute(*output)
 
     # store image and additional data in dict
-    image = dict({
+    images = dict({
             'img': img,
             'timestamp': time,
-            'log': np.zeros(1),
             })
-    log.debug('Image time: {}'.format(time))
+    stars = skycam.process_image(images, config)
 
-    log.debug('Creating Observer')
-    obs = skycam.obs_setup(time)
-    log.debug('Parsing Catalogue')
-    stars, planets, moon, sun = skycam.star_planets_moon_sun_dataframes(
-            obs, 
-            cam=config['image'],
-            )
-
-    rem = skycam.filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
-
-    # calculate x and y position
-    log.debug('Calculate x and y')
-    stars['x'], stars['y'] = skycam.horizontal2image(stars.azimuth, stars.altitude, cam=config['image'])
-    planets['x'], planets['y'] = skycam.horizontal2image(planets.azimuth, planets.altitude, cam=config['image'])
-    moon['x'], moon['y'] = skycam.horizontal2image(moon['azimuth'], moon['altitude'], cam=config['image'])
-
-
-
-    log.debug('Apply image filters')
-    grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
-    sobel = skimage.filters.sobel(img).clip(min=0)
-    gauss = skimage.filters.gaussian(img, sigma=1)
-    lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
-    grad[crop_mask] = 0
-    sobel[crop_mask] = 0
-    lap[crop_mask] = 0
-
-
-    
-    log.debug('Calculate Filter response')
-    stars['response'] = stars.apply(lambda s : skycam.findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
-    stars['response2'] = stars.apply(lambda s : skycam.findLocalMaxValue(sobel, s.x, s.y, 2), axis=1)
-    stars['response3'] = stars.apply(lambda s : skycam.findLocalMaxValue(lap, s.x, s.y, 2), axis=1)
     '''
     stars = pd.concat([stars, stars.apply(
-            lambda s : skycam.findLocalMaxPos(grad, s.x, s.y, 2),
+            lambda s : skycam.findLocalMaxPos(lap, s.x, s.y, 2),
             axis=1)],axis=1)
     '''
 
-    gradList = list()
-    sobelList = list()
-    lapList = list()
-    gradList2 = list()
-    sobelList2 = list()
-    lapList2 = list()
 
-    ax = plt.subplot(111)
-    ax.imshow(img, cmap='gray')
-    stars.plot.scatter(ax=ax, x='x', y='y', color='red')
-    (stars.loc[rem]).plot.scatter(ax=ax, x='x', y='y', color='green')
-    plt.show()
-    embed()
-    stars.query('275 < y < 280 & 140 < x 150').head()
-    '''
-    response = np.logspace(-4,0,500)
-    for resp in response:
-        labeled, labelCnt = label(grad>resp)
-        stars['visible'] = stars.response > resp
-        gradList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
-        labeled, labelCnt = label(sobel>resp)
-        stars['visible'] = stars.response2 > resp
-        sobelList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
-        labeled, labelCnt = label(lap>resp)
-        stars['visible'] = stars.response3 > resp
-        lapList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
+    if args['--ratescan']:
+        gradList = list()
+        sobelList = list()
+        lapList = list()
 
-    gradList = np.array(gradList)
-    sobelList = np.array(sobelList)
-    lapList = np.array(lapList)
-    gradList2 = np.array(gradList2)
-    sobelList2 = np.array(sobelList2)
-    lapList2 = np.array(lapList2)
+        response = np.logspace(-4,0,500)
+        for resp in response:
+            labeled, labelCnt = label(grad>resp)
+            stars['visible'] = stars.response > resp
+            gradList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
+            labeled, labelCnt = label(sobel>resp)
+            stars['visible'] = stars.response2 > resp
+            sobelList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
+            labeled, labelCnt = label(lap>resp)
+            stars['visible'] = stars.response3 > resp
+            lapList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
 
-    fig = plt.figure(figsize=(19.2,10.8))
-    ax1 = fig.add_subplot(111)
-    plt.xscale('log')
-    plt.grid()
-    ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
-    ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
-    ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
-    ax1.set_ylabel('')
-    ax1.legend(loc='center left')
+        gradList = np.array(gradList)
+        sobelList = np.array(sobelList)
+        lapList = np.array(lapList)
 
-    ax2 = ax1.twinx()
-    #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
-    #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
-    #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
-    ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
-    ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
-    ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
-    ax2.legend(loc='upper right')
-    ax2.set_ylim((0,16000))
-    plt.savefig('rateScan.pdf')
-    embed()
+        fig = plt.figure(figsize=(19.2,10.8))
+        ax1 = fig.add_subplot(111)
+        plt.xscale('log')
+        plt.grid()
+        ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
+        ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
+        ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
+        ax1.set_ylabel('')
+        ax1.legend(loc='center left')
+
+        ax2 = ax1.twinx()
+        #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
+        #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
+        #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
+        ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
+        ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
+        ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
+        ax2.legend(loc='upper right')
+        ax2.set_ylim((0,16000))
+        plt.savefig('rateScan.pdf')
 
     if args['-v']:
-    fig = plt.figure()
-    ax = fig.add_subplot(121)
-    stars.query('visible == True').plot.scatter(ax=ax, x='x', y='y', color='green')
-    stars.query('visible == False').plot.scatter(ax=ax, x='x', y='y', color='red')
-    stars.plot.scatter(x='vmag', y='response2', color='red', grid=True)
-    plt.show()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+
+        ax.imshow(img, cmap='gray')
+        
+        plt.show()
+        '''
+        ax = fig.add_subplot(121)
+        stars.query('visible == True').plot.scatter(ax=ax, x='x', y='y', color='green')
+        stars.query('visible == False').plot.scatter(ax=ax, x='x', y='y', color='red')
+        stars.plot.scatter(x='vmag', y='response2', color='red', grid=True)
+
         fig = plt.figure()
         ax = fig.add_subplot(121)
-        ax.imshow(-lap/0.05, cmap='Greys_r', interpolation='none')
+        ax.imshow(-images['lap']/0.05, cmap='Greys_r', interpolation='none')
         ax2 = fig.add_subplot(122)
-        ax2.imshow(-grad, cmap='Greys_r', interpolation='none')
+        ax2.imshow(-images['grad'], cmap='Greys_r', interpolation='none')
         plt.legend()
         fig = plt.figure()
         ax3 = fig.add_subplot(121)
-        ax3.imshow(img, cmap='Greys_r', interpolation='none')
+        ax3.imshow(images['img'], cmap='Greys_r', interpolation='none')
         ax4 = fig.add_subplot(122)
-        ax4.imshow(img, cmap='Greys_r', interpolation='none')
+        ax4.imshow(images['img'], cmap='Greys_r', interpolation='none')
         ax.grid()
         ax2.grid()
         ax3.grid()
         ax4.grid()
 
         fig = plt.figure()
-        plt.hist(lap.flatten(), bins=100, range=(0,0.05))
+        plt.hist(images['lap'].flatten(), bins=100, range=(0,0.05))
         plt.show()
-        pass
-    '''
-
+        '''
+    
 
 
 

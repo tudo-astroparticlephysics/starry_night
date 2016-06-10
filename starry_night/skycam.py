@@ -22,6 +22,9 @@ import logging
 
 import re
 from io import BytesIO
+import skimage.filters
+from scipy.ndimage.measurements import label
+from dask import delayed
 from IPython import embed
 
 
@@ -254,6 +257,7 @@ def star_planets_moon_sun_dataframes(observer, cam):
     }
 
     # calculate angle to moon
+    log.debug('Calculate Angle to Moon')
     stars['angleToMoon'] = stars.apply(lambda x : np.arccos(np.sin(x.altitude)*
         np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
         np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
@@ -262,6 +266,7 @@ def star_planets_moon_sun_dataframes(observer, cam):
             np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
             np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
 
+    log.debug('Load Sun')
     sun = ephem.Sun()
     sun.compute(observer)
     sunData = {
@@ -322,6 +327,8 @@ def findLocalMaxPos(img, x, y, radius):
             return pd.Series({'maxX':0, 'maxY':0})
     return pd.Series({'maxX':int(x), 'maxY':int(y)})
 
+
+@delayed(pure=True)
 def loadImageAndTime(filename, crop=None, fmt=None):
     '''
     Open an image file and return its content as a numpy array.
@@ -354,10 +361,10 @@ def loadImageAndTime(filename, crop=None, fmt=None):
         except ValueError:
             log.error('Filename {} does not match {}'.format(filename, fmt))
             sys.exit(1)
-    return img, time
+    return (img, time)
 
     
-def crop_mask(img, crop):
+def get_crop_mask(img, crop):
     '''
     crop is dictionary with cropping information
     returns a boolean array in size of img: False got cropped; True not cropped 
@@ -475,6 +482,7 @@ def filter_catalogue(catalogue, rng):
     
     i1 = 0
     while i1 < len(reference_list)-1:
+        log.debug('Items left: {}/{}'.format(i1,len(reference_list)-1))
         row1 = reference_list[i1]
         pop_index = i1 + 1
         i2 = i1 +1
@@ -482,11 +490,6 @@ def filter_catalogue(catalogue, rng):
             row2 = reference_list[i2]
             deltaDeg = np.rad2deg(2*np.arcsin(np.sqrt(np.sin((row1[1]-row2[1])/2)**2 + np.cos(row1[1])*np.cos(row2[1])*np.sin((row1[0]-row2[0])/2)**2)))
             if deltaDeg < rng:
-                if filtered_list[pop_index] == 28358:
-                    print(row1, row2, deltaDeg)
-                if filtered_list[pop_index] == 26241:
-                    print(row1, row2, deltaDeg)
-
                 filtered_list.pop(pop_index)
                 reference_list.pop(pop_index)
             else:
@@ -495,3 +498,50 @@ def filter_catalogue(catalogue, rng):
         i1 += 1
     return filtered_list
 
+@delayed(pure=True)
+def process_image(images, config):
+    log = logging.getLogger(__name__)
+    img = images['img']
+
+    # create cropping array to mask unneccessary image regions.
+    crop_mask = get_crop_mask(img, config['crop'])
+
+    log.debug('Image time: {}'.format(images['timestamp']))
+
+    log.debug('Creating Observer')
+    obs = obs_setup(images['timestamp'])
+    log.debug('Parsing Catalogue')
+    stars, planets, moon, sun = star_planets_moon_sun_dataframes(
+            obs, 
+            cam=config['image'],
+            )
+
+    #log.info('Filtering catalogue')
+    #rem = filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
+
+    # calculate x and y position
+    log.debug('Calculate x and y')
+    stars['x'], stars['y'] = horizontal2image(stars.azimuth, stars.altitude, cam=config['image'])
+    planets['x'], planets['y'] = horizontal2image(planets.azimuth, planets.altitude, cam=config['image'])
+    moon['x'], moon['y'] = horizontal2image(moon['azimuth'], moon['altitude'], cam=config['image'])
+
+
+    log.debug('Apply image filters')
+    grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
+    sobel = skimage.filters.sobel(img).clip(min=0)
+    gauss = skimage.filters.gaussian(img, sigma=1)
+    lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+    grad[crop_mask] = 0
+    sobel[crop_mask] = 0
+    lap[crop_mask] = 0
+
+    images['grad'] = grad
+    images['sobel'] = sobel
+    images['lap'] = lap
+
+    log.debug('Calculate Filter response')
+    stars['response'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
+    stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, 2), axis=1)
+    stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, 2), axis=1)
+
+    return stars
