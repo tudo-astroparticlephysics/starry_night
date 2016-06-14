@@ -33,7 +33,7 @@ import configparser
 from pkg_resources import resource_filename
 import skimage.filters
 from scipy.ndimage.measurements import label
-from dask import delayed, compute
+from distributed import Scheduler, Worker, Executor
 
 from starry_night import skycam
 from IPython import embed
@@ -87,9 +87,16 @@ def main(args):
         'starry_night', '../data/{}'.format(args['-c']))
     )
 
+    log.debug('Parsing Catalogue')
+    celestialObjects = skycam.star_planets_sun_moon_dict()
+    log.debug('Creating observer')
+    obs = skycam.obs_setup(config['properties'])
 
-    # download current image from URL
+    # aquire image(s)
+    output = list()
     if not args['<image>']:
+        # download current image from URL
+        singleMode = True
         log.info('Downloading image from {}'.format(config['properties']['url']))
         try:
             img = skycam.downloadImg(
@@ -101,43 +108,65 @@ def main(args):
             log.error('Download of image failed')
             raise
 
-        time = datetime.utcnow()
+        images = dict({
+                'img': img,
+                'timestamp': datetime.utcnow(),
+                })
+        output.append(
+                skycam.process_image(images, celestialObjects, config, obs)
+        )
 
 
-    # use the image(s) provided by the user
+    # use the single image(s) provided by the user
     elif len(args['<image>']) == 1:
+        singleMode = True
         log.info('Do an offline analysis of an image file')
-        img, time = skycam.loadImageAndTime(args['<image>'][0], crop=config['crop'], fmt=config['image']['timestamp'])
+        images = skycam.getImageDict(args['<image>'][0], config)
+
         if args['-t'] is not None:
-            time = time + timedelta(minutes=float(config['properties']['timeoffset']))
-        else:
             time = datetime(args['-t'])
-        log.info('Opened image: {} with time'.format(args['<image>'], time))
+        images['timestamp'] = time
+        log.info('Opened image: {} with time'.format(args['<image>'][0], time))
+        output.append(
+                skycam.process_image(images, celestialObjects, config, obs)
+        )
 
     else:
+    # use multiple images provided by the user
+        singleMode = False
         log.info('Processing {} images.'.format(len(args['<image>'])))
 
-        output = list()
+        func = lambda fname, conf : skycam.process_image(
+                    skycam.getImageDict(fname, conf),
+                    celestialObjects,
+                    conf,
+                    obs
+        )
+        #skycam.process_image(skycam.getImageDict(fname, config), celestialObjects, config, obs)
+
+        print(4)
+        e = Executor('127.0.0.1:8786')
+        print(5)
+        #output = e.map(func, args['<image>'], config)
+        print(6)
+        '''
         for f in args['<image>']:
-            a = delayed(skycam.loadImageAndTime)(f, crop=config['crop'], fmt=config['image']['timestamp'], dask_key_name='three')
-            #result = delayed(skycam.process_image)(a, config)
-            #output.append(a)
+            output.append(func(f, config))
+            #output.append(skycam.process_image(skycam.getImageDict(f, config), celestialObjects, config, obs))
 
-        print(output)
         result = compute(*output)
-
+        '''
+        embed()
     # store image and additional data in dict
-    images = dict({
-            'img': img,
-            'timestamp': time,
-            })
-    stars = skycam.process_image(images, config)
 
     '''
     stars = pd.concat([stars, stars.apply(
             lambda s : skycam.findLocalMaxPos(lap, s.x, s.y, 2),
             axis=1)],axis=1)
     '''
+
+    #log.info('Filtering catalogue')
+    #rem = filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
 
 
     if args['--ratescan']:
@@ -182,13 +211,27 @@ def main(args):
         ax2.set_ylim((0,16000))
         plt.savefig('rateScan.pdf')
 
-    if args['-v']:
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
+        if args['-v']:
+            plt.show()
 
-        ax.imshow(img, cmap='gray')
-        
-        plt.show()
+    if args['-v']:
+        if singleMode:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+
+            ax.imshow(images['img'], cmap='gray')
+            
+            plt.show()
+        else:
+            for r in result:
+                fig = plt.figure()
+                ax = fig.add_subplot(111)
+                ax.imshow(r[1]['img'], cmap='gray')
+                ax.scatter(r[0].x.values, r[0].y.values)
+                print(r[1]['timestamp'])
+                plt.show()
+
+
         '''
         ax = fig.add_subplot(121)
         stars.query('visible == True').plot.scatter(ax=ax, x='x', y='y', color='green')
