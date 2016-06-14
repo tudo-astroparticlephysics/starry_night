@@ -11,7 +11,7 @@ from skimage.io import imread
 from skimage.color import rgb2gray
 
 from astropy.io import fits
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import sleep
 
 from configparser import RawConfigParser
@@ -24,7 +24,6 @@ import re
 from io import BytesIO
 import skimage.filters
 from scipy.ndimage.measurements import label
-from dask import delayed
 from IPython import embed
 
 
@@ -128,13 +127,12 @@ def horizontal2image(az, alt, cam):
     return x, y
 
 
-def obs_setup(date):
+def obs_setup(properties):
     ''' creates an ephem.Observer for the MAGIC Site at given date '''
     obs = ephem.Observer()
     obs.lon = '-17:53:28'
     obs.lat = '28:45:42'
     obs.elevation = 2200
-    obs.date = date
     obs.epoch = ephem.J2000
     return obs
 
@@ -178,11 +176,12 @@ def equatorial2horizontal(ra, dec, observer):
 
 
 
-def star_planets_moon_sun_dataframes(observer, cam):
+def star_planets_sun_moon_dict():
     '''
-    Read the given star catalog, add planets from ephem and calculate
-    horizontal coordinates for all celestial object.
-    Remove objects that do not fulfill the needed requirements.
+    Read the given star catalog, add planets from ephem and fill sun and moon with NaNs
+    For horizontal coordinates 'update_star_position()' needs to be called next.
+
+    Returns: dictionary with celestial objects
     '''
     log = logging.getLogger(__name__)
     
@@ -201,6 +200,70 @@ def star_planets_moon_sun_dataframes(observer, cam):
     # transform degrees to radians
     stars.ra = np.deg2rad(stars.ra)
     stars.dec = np.deg2rad(stars.dec)
+
+    stars['altitude'] = np.NaN
+    stars['azimuth'] = np.NaN
+
+    # add the planets
+    planets = pd.DataFrame()
+    for planet in ['Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune']:
+        data = {
+            'ra': np.NaN,
+            'dec': np.NaN,
+            'gLon': np.NaN,
+            'gLat': np.NaN,
+            'vmag': np.NaN,
+            'name': planet,
+        }
+        planets = planets.append(data, ignore_index=True)
+
+    moonData = {
+        'moonPhase' : np.NaN,
+        'altitude' : np.NaN,
+        'azimuth' : np.NaN,
+    }
+
+    sunData = {
+        'altitude' : np.NaN,
+        'azimuth' : np.NaN,
+    }
+
+    return dict({'stars': stars,
+        'planets': planets,
+        'sun': sunData,
+        'moon': moonData,
+        })
+
+def update_star_position(celestialObjects, observer, cam):
+    '''
+    Takes the dictionary from 'star_planets_sun_moon_dict(observer)'
+    and calculates the current position of each object in the sky
+    also sets position of sun and moon (were filled with NaNs so far)
+    Objects that are not within the camera limits (vmag, altitude, crop...) get removed.
+
+    Returns: dictionary with updated positions
+    '''
+    log = logging.getLogger(__name__)
+    print('Observer time:{}'.format(observer.date))
+
+    # include moon data
+    log.debug('Loading moon')
+    moon = ephem.Moon()
+    moon.compute(observer)
+    moonData = {
+        'moonPhase' : moon.moon_phase,
+        'altitude' : np.deg2rad(moon.alt),
+        'azimuth' : np.deg2rad(moon.az),
+    }
+
+    # include sun data
+    log.debug('Load Sun')
+    sun = ephem.Sun()
+    sun.compute(observer)
+    sunData = {
+        'altitude' : np.deg2rad(sun.alt),
+        'azimuth' : np.deg2rad(sun.az),
+    }
 
     # add the planets
     log.debug('Loading planets')
@@ -224,37 +287,25 @@ def star_planets_moon_sun_dataframes(observer, cam):
             'gLon': float(galactic.lon)/np.pi*180,
             'gLat': float(galactic.lat)/np.pi*180,
             'vmag': float(sol_object.mag),
+            'azimuth': float(sol_object.az),
+            'altitude': float(sol_object.alt),
             'name': sol_object.name,
         }
         planets = planets.append(data, ignore_index=True)
     planets.set_index('name', inplace=True)
 
-    stars['azimuth'], stars['altitude'] = equatorial2horizontal(
-        stars.ra, stars.dec, observer,
-    )
-    planets['azimuth'], planets['altitude'] = equatorial2horizontal(
-        planets.ra, planets.dec, observer,
-    )
-
     # remove stars and planets that are not within the limits
     try:
-        stars = stars.query('altitude > {}'.format(np.deg2rad(90 - float(cam['openingangle']))))
-        planets = planets.query('altitude > {}'.format(np.deg2rad(90 - float(cam['openingangle']))))
-        stars = stars.query('vmag < {}'.format(cam['vmaglimit']))
-        planets = planets.query('vmag < {}'.format(cam['vmaglimit']))
+        stars = celestialObjects['stars'].copy()
+        stars['azimuth'], stars['altitude'] = equatorial2horizontal(
+            stars.ra, stars.dec, observer,
+        )
+        stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(cam['openingangle'])), cam['vmaglimit']), inplace=True)
+        planets.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(cam['openingangle'])), cam['vmaglimit']), inplace=True)
     except:
         log.error('Using altitude or vmag limit failed!')
         raise
 
-    # include moon data
-    log.debug('Loading moon')
-    moon = ephem.Moon()
-    moon.compute(observer)
-    moonData = {
-        'moonPhase' : moon.moon_phase,
-        'altitude' : np.deg2rad(moon.alt),
-        'azimuth' : np.deg2rad(moon.az),
-    }
 
     # calculate angle to moon
     log.debug('Calculate Angle to Moon')
@@ -266,14 +317,15 @@ def star_planets_moon_sun_dataframes(observer, cam):
             np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
             np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
 
-    log.debug('Load Sun')
-    sun = ephem.Sun()
-    sun.compute(observer)
-    sunData = {
-        'altitude' : np.deg2rad(sun.alt),
-        'azimuth' : np.deg2rad(sun.az),
-    }
-    return stars, planets, moonData, sunData
+
+    # calculate x and y position
+    log.debug('Calculate x and y')
+    stars['x'], stars['y'] = horizontal2image(stars.azimuth, stars.altitude, cam=cam)
+    planets['x'], planets['y'] = horizontal2image(planets.azimuth, planets.altitude, cam=cam)
+    moonData['x'], moonData['y'] = horizontal2image(moonData['azimuth'], moonData['altitude'], cam=cam)
+    sunData['x'], sunData['y'] = horizontal2image(sunData['azimuth'], sunData['altitude'], cam=cam)
+
+    return {'stars':stars, 'planets':planets, 'moon': moonData, 'sun': sunData}
 
 def findLocalMaxValue(img, x, y, radius):
     '''
@@ -328,8 +380,7 @@ def findLocalMaxPos(img, x, y, radius):
     return pd.Series({'maxX':int(x), 'maxY':int(y)})
 
 
-@delayed(pure=True)
-def loadImageAndTime(filename, crop=None, fmt=None):
+def getImageDict(filename, config, crop=None, fmt=None):
     '''
     Open an image file and return its content as a numpy array.
     
@@ -338,30 +389,44 @@ def loadImageAndTime(filename, crop=None, fmt=None):
         crop: crop image to a circle with center and radius
         fmt: format timestring like 'gtc_allskyimage_%Y%m%d_%H%M%S.jpg'
             used for parsing the date from filename
+    Returns: Dictionary with image array and timestamp datetime object
     '''
     log = logging.getLogger(__name__)
+
     #TODO: read image time from mat and fits file
+    # get image time from filename
+    try:
+        if fmt is None:
+            time = datetime.strptime(filename, config['image']['timeformat'])
+        else:
+            time = datetime.strptime(filename, fmt)
+        time += timedelta(minutes=float(config['properties']['timeoffset']))
+    
+    except ValueError:
+        fmt = (config['image']['timeformat'] if fmt is None else fmt)
+        log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
+        sys.exit(1)
+
+    # read mat file
     if filename.endswith('.mat'):
         data = matlab.loadmat(filename)
         img = data[dictEntry]
-        if fmt is None:
-            time = datetime.strptime(filename, fmt)
+
+    # read fits file
     elif filename.endswith('.fits'):
         hdulist = fits.open(filename)
         img = hdulist[0].data
-        if fmt is None:
-            time = datetime.strptime(filename, fmt)
     else:
+        # read normal image file
         try:
             img = imread(filename, mode='L', as_grey=True)
-            time = datetime.strptime(filename, fmt)
         except (FileNotFoundError, OSError):
             log.error('File {} not found. Or filetype invalid'.format(filename))
             sys.exit(1)
         except ValueError:
-            log.error('Filename {} does not match {}'.format(filename, fmt))
+            log.error('Filename {} does not match {}'.format(filename, config['image']['timeformat']))
             sys.exit(1)
-    return (img, time)
+    return dict({'img': img, 'timestamp': time})
 
     
 def get_crop_mask(img, crop):
@@ -384,6 +449,7 @@ def get_crop_mask(img, crop):
                 else:
                     disk_mask = disk_mask | ((row - int(y))**2 + (col - int(x))**2 < int(r)**2)
         except:
+            log = logging.getLogger(__name__)
             log.error('Cropping failed, maybe there is a typing error in the config file?')
             raise
         return disk_mask
@@ -498,32 +564,22 @@ def filter_catalogue(catalogue, rng):
         i1 += 1
     return filtered_list
 
-@delayed(pure=True)
-def process_image(images, config):
+def process_image(images, celestialObjects, config, observer):
     log = logging.getLogger(__name__)
-    img = images['img']
 
-    # create cropping array to mask unneccessary image regions.
-    crop_mask = get_crop_mask(img, config['crop'])
-
+    log.debug('Update Observer')
+    observer.date = images['timestamp']
     log.debug('Image time: {}'.format(images['timestamp']))
 
-    log.debug('Creating Observer')
-    obs = obs_setup(images['timestamp'])
-    log.debug('Parsing Catalogue')
-    stars, planets, moon, sun = star_planets_moon_sun_dataframes(
-            obs, 
-            cam=config['image'],
-            )
 
-    #log.info('Filtering catalogue')
-    #rem = filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
+    # create cropping array to mask unneccessary image regions.
+    img = images['img']
+    crop_mask = get_crop_mask(img, config['crop'])
 
-    # calculate x and y position
-    log.debug('Calculate x and y')
-    stars['x'], stars['y'] = horizontal2image(stars.azimuth, stars.altitude, cam=config['image'])
-    planets['x'], planets['y'] = horizontal2image(planets.azimuth, planets.altitude, cam=config['image'])
-    moon['x'], moon['y'] = horizontal2image(moon['azimuth'], moon['altitude'], cam=config['image'])
+    # update celestial objects
+    celObjects = update_star_position(celestialObjects, observer, config['image'])
+
+    stars = pd.concat([celObjects['stars'], celObjects['planets']])
 
 
     log.debug('Apply image filters')
@@ -544,4 +600,4 @@ def process_image(images, config):
     stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, 2), axis=1)
     stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, 2), axis=1)
 
-    return stars
+    return stars, images
