@@ -117,11 +117,11 @@ def horizontal2image(az, alt, cam):
         x = np.float(cam['zenith_x']) + theta2r(np.pi/2 - alt,
                 np.float(cam['radius']),
                 how=cam['angleprojection']
-                ) * np.cos(az+np.float(cam['azimuthoffset']))
+                ) * np.cos(az+np.deg2rad(np.float(cam['azimuthoffset'])))
         y = np.float(cam['zenith_y']) - theta2r(np.pi/2 - alt,
                 np.float(cam['radius']),
                 how=cam['angleprojection']
-                ) * np.sin(az+np.float(cam['azimuthoffset']))
+                ) * np.sin(az+np.deg2rad(np.float(cam['azimuthoffset'])))
     except:
         raise
     return x, y
@@ -380,7 +380,7 @@ def findLocalMaxPos(img, x, y, radius):
     return pd.Series({'maxX':int(x), 'maxY':int(y)})
 
 
-def getImageDict(filename, config, crop=None, fmt=None):
+def getImageDict(filepath, config, crop=None, fmt=None):
     '''
     Open an image file and return its content as a numpy array.
     
@@ -395,6 +395,8 @@ def getImageDict(filename, config, crop=None, fmt=None):
 
     #TODO: read image time from mat and fits file
     # get image time from filename
+    filename = filepath.split('/')[-1].split('.')[0]
+    filetype= filepath.split('.')[-1]
     try:
         if fmt is None:
             time = datetime.strptime(filename, config['image']['timeformat'])
@@ -404,27 +406,26 @@ def getImageDict(filename, config, crop=None, fmt=None):
     
     except ValueError:
         fmt = (config['image']['timeformat'] if fmt is None else fmt)
+        log.error('{},{}'.format(filename,filepath))
         log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
+        raise
         sys.exit(1)
 
     # read mat file
-    if filename.endswith('.mat'):
-        data = matlab.loadmat(filename)
+    if filetype == 'mat':
+        data = matlab.loadmat(filepath)
         img = data[dictEntry]
 
     # read fits file
-    elif filename.endswith('.fits'):
-        hdulist = fits.open(filename)
+    elif (filetype == 'fits') or (filetype == 'gz'):
+        hdulist = fits.open(filepath)
         img = hdulist[0].data
     else:
         # read normal image file
         try:
-            img = imread(filename, mode='L', as_grey=True)
+            img = imread(filepath, mode='L', as_grey=True)
         except (FileNotFoundError, OSError):
             log.error('File {} not found. Or filetype invalid'.format(filename))
-            sys.exit(1)
-        except ValueError:
-            log.error('Filename {} does not match {}'.format(filename, config['image']['timeformat']))
             sys.exit(1)
     return dict({'img': img, 'timestamp': time})
 
@@ -564,10 +565,11 @@ def filter_catalogue(catalogue, rng):
         i1 += 1
     return filtered_list
 
-def process_image(images, celestialObjects, config, observer):
+def process_image(images, celestialObjects, config):
     log = logging.getLogger(__name__)
 
-    log.debug('Update Observer')
+    log.debug('Creating observer')
+    observer = obs_setup(config['properties'])
     observer.date = images['timestamp']
     log.debug('Image time: {}'.format(images['timestamp']))
 

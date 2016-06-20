@@ -89,8 +89,6 @@ def main(args):
 
     log.debug('Parsing Catalogue')
     celestialObjects = skycam.star_planets_sun_moon_dict()
-    log.debug('Creating observer')
-    obs = skycam.obs_setup(config['properties'])
 
     # aquire image(s)
     output = list()
@@ -112,51 +110,34 @@ def main(args):
                 'img': img,
                 'timestamp': datetime.utcnow(),
                 })
-        output.append(
-                skycam.process_image(images, celestialObjects, config, obs)
+        results.append(
+                skycam.process_image(images, celestialObjects, config)
         )
 
 
     # use the single image(s) provided by the user
-    elif len(args['<image>']) == 1:
-        singleMode = True
-        log.info('Do an offline analysis of an image file')
-        images = skycam.getImageDict(args['<image>'][0], config)
 
-        if args['-t'] is not None:
-            time = datetime(args['-t'])
-        images['timestamp'] = time
-        log.info('Opened image: {} with time'.format(args['<image>'][0], time))
-        output.append(
-                skycam.process_image(images, celestialObjects, config, obs)
-        )
+        #log.info('Opened image: {} with time'.format(args['<image>'][0], images['timestamp']))
 
     else:
-    # use multiple images provided by the user
-        singleMode = False
-        log.info('Processing {} images.'.format(len(args['<image>'])))
+        # use (multiple) image(s) provided by the user
+        if len(args['<image>']) == 1:
+            singleMode = True
+            if args['-t'] is not None:
+                images['timestamp'] = datetime(args['-t'])
+        else:
+            singleMode = False
+        imgCount = len(args['<image>'])
+        log.info('Processing {} images.'.format(imgCount))
 
-        func = lambda fname, conf : skycam.process_image(
-                    skycam.getImageDict(fname, conf),
-                    celestialObjects,
-                    conf,
-                    obs
-        )
-        #skycam.process_image(skycam.getImageDict(fname, config), celestialObjects, config, obs)
-
-        print(4)
+        results = list()
         e = Executor('127.0.0.1:8786')
-        print(5)
-        #output = e.map(func, args['<image>'], config)
-        print(6)
-        '''
-        for f in args['<image>']:
-            output.append(func(f, config))
-            #output.append(skycam.process_image(skycam.getImageDict(f, config), celestialObjects, config, obs))
-
-        result = compute(*output)
-        '''
-        embed()
+        for img in args['<image>']:
+            temp = e.submit(skycam.getImageDict, img, config, pure=False)
+            output = e.submit(skycam.process_image, temp, celestialObjects, config, pure=False)
+            results.append(output)
+        #output = e.map(func, '/home/jan/t/'+args['<image>'][0], [config])
+        
     # store image and additional data in dict
 
     '''
@@ -170,63 +151,71 @@ def main(args):
 
 
     if args['--ratescan']:
-        gradList = list()
-        sobelList = list()
-        lapList = list()
+        for res in results:
+            gradList = list()
+            sobelList = list()
+            lapList = list()
 
-        response = np.logspace(-4,0,500)
-        for resp in response:
-            labeled, labelCnt = label(grad>resp)
-            stars['visible'] = stars.response > resp
-            gradList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
-            labeled, labelCnt = label(sobel>resp)
-            stars['visible'] = stars.response2 > resp
-            sobelList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
-            labeled, labelCnt = label(lap>resp)
-            stars['visible'] = stars.response3 > resp
-            lapList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
+            response = np.logspace(-4,0,500)
+            for resp in response:
+                labeled, labelCnt = label(grad>resp)
+                stars['visible'] = stars.response > resp
+                gradList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
+                labeled, labelCnt = label(sobel>resp)
+                stars['visible'] = stars.response2 > resp
+                sobelList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
+                labeled, labelCnt = label(lap>resp)
+                stars['visible'] = stars.response3 > resp
+                lapList.append((skycam.calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
 
-        gradList = np.array(gradList)
-        sobelList = np.array(sobelList)
-        lapList = np.array(lapList)
+            gradList = np.array(gradList)
+            sobelList = np.array(sobelList)
+            lapList = np.array(lapList)
 
-        fig = plt.figure(figsize=(19.2,10.8))
-        ax1 = fig.add_subplot(111)
-        plt.xscale('log')
-        plt.grid()
-        ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
-        ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
-        ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
-        ax1.set_ylabel('')
-        ax1.legend(loc='center left')
+            fig = plt.figure(figsize=(19.2,10.8))
+            ax1 = fig.add_subplot(111)
+            plt.xscale('log')
+            plt.grid()
+            ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
+            ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
+            ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
+            ax1.set_ylabel('')
+            ax1.legend(loc='center left')
 
-        ax2 = ax1.twinx()
-        #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
-        #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
-        #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
-        ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
-        ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
-        ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
-        ax2.legend(loc='upper right')
-        ax2.set_ylim((0,16000))
-        plt.savefig('rateScan.pdf')
+            ax2 = ax1.twinx()
+            #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
+            #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
+            #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
+            ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
+            ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
+            ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
+            ax2.legend(loc='upper right')
+            ax2.set_ylim((0,16000))
+            plt.savefig('rateScan.pdf')
 
-        if args['-v']:
-            plt.show()
+            if args['-v']:
+                plt.show()
 
     if args['-v']:
-        if singleMode:
+        if False:
             fig = plt.figure()
             ax = fig.add_subplot(111)
+            vmin = np.nanpercentile(image, 0.5)
+            vmax = np.nanpercentile(image, 99.5)
+            ax.imshow(image,cmap='gray',vmin=vmin,vmax=vmax)
+            
 
             ax.imshow(images['img'], cmap='gray')
             
             plt.show()
         else:
-            for r in result:
+            for res in results:
+                r = res.result()
                 fig = plt.figure()
                 ax = fig.add_subplot(111)
-                ax.imshow(r[1]['img'], cmap='gray')
+                vmin = np.nanpercentile(r[1]['img'], 0.5)
+                vmax = np.nanpercentile(r[1]['img'], 99.5)
+                ax.imshow(r[1]['img'],cmap='gray',vmin=vmin,vmax=vmax)
                 ax.scatter(r[0].x.values, r[0].y.values)
                 print(r[1]['timestamp'])
                 plt.show()
