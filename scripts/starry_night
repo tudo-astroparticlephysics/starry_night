@@ -16,7 +16,7 @@ Options:
 
     --ratescan      Create ratescan-like plot of visibility threshold
     --response      Show response Magnitude log plot
-    --cloud_map     Create cloud map of the sky
+    --cloudmap     Create cloud map of the sky
     --version       Show version.
     --debug         debug it [default: False]
 '''
@@ -134,12 +134,20 @@ def main(args):
         imgCount = len(args['<image>'])
         log.info('Processing {} images.'.format(imgCount))
 
-        pool = Pool()
         par = partial(wrapper, config, celestialObjects, args)
-        #embed()
-        results = pool.imap(par, args['<image>'])
-        pool.close()
-        pool.join()
+
+        # don't use multiprocessing in debug mode
+        if args['--debug']:
+            results = list()
+            for img in args['<image>']:
+                results.append(par(img))
+        else:
+            pool = Pool()
+            # use map now, because we want all results
+            #results = pool.imap(par, args['<image>'])
+            results = pool.map(par, args['<image>'])
+            pool.close()
+            pool.join()
 
 
     
@@ -148,26 +156,6 @@ def main(args):
     #log.info('Filtering catalogue')
     #rem = filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
     
-    if args['--response']:
-        a = results[0].result()
-        lap = a[1]['lap']
-        stars = a[0]
-
-        stars = pd.concat([stars, stars.apply(
-                lambda s : skycam.findLocalMaxPos(lap, s.x, s.y, 2),
-                axis=1)],axis=1)
-        stars2 = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
-
-        fig = plt.figure(figsize=(4,3))
-        ax = plt.subplot(111)
-        stars2.plot.scatter(x='vmag',y='response3',ax=ax, logy=True, grid=True)
-        ax.set_xlim((0,6))
-        ax.set_ylim((10,2e4))
-        ax.set_ylabel('Kernel Response')
-        ax.set_xlabel('Star Magnitude')
-        
-        font = {'size'   : 16, 'weight':'bold'}
-        rc('font', **font)
 
 
 

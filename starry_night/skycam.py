@@ -9,6 +9,7 @@ import sys
 from scipy.io import matlab
 from skimage.io import imread
 from skimage.color import rgb2gray
+import skimage.filters.rank as rank
 
 from astropy.io import fits
 from datetime import datetime, timedelta
@@ -538,19 +539,37 @@ def calc_star_percentage(position, stars, rng, unit='deg', weight=False):
         else:
             percentage = len(starsInRange.query('visible').index)/len(starsInRange.index)
     except ZeroDivisionError:
-        log = logging.getLogger(__name__)
-        log.warning('No stars in range to calc percentage. Returning -1.')
+        #log = logging.getLogger(__name__)
+        #log.warning('No stars in range to calc percentage. Returning -1.')
         percentage = -1
 
     return percentage
 
 
 def calc_cloud_map(stars, rng, img_shape, weight=False):
-    cloud_map = np.zeros(img_shape)
-    for i in range(img_shape[0]):
-        for j in range(img_shape[1]):
-            cloud_map[i,j] = calc_star_percentage((i,j), stars, 10, 'pixel', weight)
-    return cloud_map
+    visible = stars.query('visible == True')
+    nrows = ncols = rng*2 +1
+    row, col = np.ogrid[:nrows, :ncols]
+    disk_mask = np.zeros((nrows, ncols))
+    disk_mask[((row - rng)**2 + (col - rng)**2 < int(rng)**2)] = 1
+    if weight:
+        scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, weight=2.5**stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars_visible, _, _ = np.histogram2d(x=visible.y.values, y=visible.x.values, weight=2.5**stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        density_visible = skimage.filters.gaussian(scattered_stars_visible.astype(np.int16), rng)
+        density_all = skimage.filters.gaussian(scattered_stars.astype(np.int16), rng)
+    else:
+        scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars_visible, _, _ = np.histogram2d(visible.y.values, visible.x.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        #a=rank.sum(star_count_map.astype(np.int16), disk_mask)
+        #b=rank.sum(cloud_map.astype(np.int16), disk_mask)
+        density_visible = skimage.filters.gaussian(scattered_stars_visible.astype(np.int16), rng)
+        density_all = skimage.filters.gaussian(scattered_stars.astype(np.int16), rng)
+    #cut = a<3
+    #a[cut] = 0
+    #b[cut] = 0
+    
+    return (1-density_visible/density_all)
+
 
 
 def filter_catalogue(catalogue, rng):
@@ -625,6 +644,32 @@ def process_image(images, celestialObjects, config, args):
     stars['response'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, 2), axis=1)
     stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, 2), axis=1)
     stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, 2), axis=1)
+    stars['visible'] = (stars['response3'] > 10**-0.9 - 10**-(stars['vmag']*1.6/5))#0.15)#- vmag*0.03)
+
+    thresh = (np.NaN,np.NaN,np.NaN)
+    ##################################
+
+
+    if args['--response']:        
+        stars = pd.concat([stars, stars.apply(
+                lambda s : findLocalMaxPos(lap, s.x, s.y, 2),
+                axis=1)],axis=1)
+        stars2 = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
+
+        fig = plt.figure(figsize=(4,3))
+        ax = plt.subplot(111)
+        stars2.plot.scatter(x='vmag',y='response3',ax=ax, logy=True, grid=True)
+        ax.set_xlim((0,6))
+        #ax.set_ylim((10,2e4))
+        ax.set_ylim((1e-3,1))
+        ax.set_ylabel('Kernel Response')
+        ax.set_xlabel('Star Magnitude')
+        
+        font = {'size'   : 16, 'weight':'bold'}
+        plt.show()
+        #embed()
+        #rc('font', **font)
+
 
     if args['--ratescan']:
         log.info('Doing ratescan')
@@ -651,6 +696,8 @@ def process_image(images, celestialObjects, config, args):
         #minThresholds = [max(response[l[:,0]==1]) for l in (gradList, sobelList, lapList)]
 
         minThresholds = -np.array([np.argmax(gradList[::-1,0]), np.argmax(sobelList[::-1,0]), np.argmax(lapList[::-1,0])]) + len(response) -1
+        clusters = (gradList[minThresholds[0],2], sobelList[minThresholds[1],2], lapList[minThresholds[2],2])
+        thresh = (response[minThresholds[0]], response[minThresholds[1]],response[minThresholds[2]])
         fig = plt.figure(figsize=(19.2,10.8))
         ax1 = fig.add_subplot(111)
         plt.xscale('log')
@@ -683,9 +730,24 @@ def process_image(images, celestialObjects, config, args):
         if args['-v']:
             plt.show()
         #plt.close()
-    if args['--cloud_map']:
-        cloud_map = calc_cloud_map(stars, 10, img.shape, weight=False)
-        plt.imshow(cloud_map, cmap='gray')
+    if args['--cloudmap']:
+        ax1 = plt.subplot(121)
+        ax1.imshow(img, cmap='gray')
+        stars.query('visible').plot.scatter(x='x',y='y', ax=ax1, color='green', grid=True)
+        stars.query('not visible').plot.scatter(x='x',y='y', ax=ax1, color='red', grid=True)
+        ax1.grid()
+
+        ax2 = plt.subplot(122)
+        cloud_map = calc_cloud_map(stars, 30, img.shape, weight=False)
+        cloud_map = calc_cloud_map(stars, 30, img.shape, weight=True)
+        ax2.imshow(cloud_map, cmap='gray_r')
+        ax2.grid()
+        #plt.imshow(cloud_map, cmap='gray')
         plt.show()
-    #del images
-    return stars, images
+        embed()
+
+    del images
+    del grad
+    del sobel
+    del lap
+    return stars, thresh
