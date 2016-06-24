@@ -79,6 +79,7 @@ def run():
 
         sleep(wait)
 
+
 def theta2r(theta, radius, how='lin'):
     '''
     convert angle to the optical axis into pixel distance to the camera
@@ -174,8 +175,6 @@ def equatorial2horizontal(ra, dec, observer):
     return az, alt
 
 
-
-
 def star_planets_sun_moon_dict():
     '''
     Read the given star catalog, add planets from ephem and fill sun and moon with NaNs
@@ -187,6 +186,7 @@ def star_planets_sun_moon_dict():
     
     log.debug('Loading stars')
     catalogue = resource_filename('starry_night', '../data/asu.tsv')
+    #catalogue = 
     stars = pd.read_csv(
         catalogue,
         sep=';',
@@ -234,6 +234,7 @@ def star_planets_sun_moon_dict():
         'moon': moonData,
         })
 
+
 def update_star_position(celestialObjects, observer, cam):
     '''
     Takes the dictionary from 'star_planets_sun_moon_dict(observer)'
@@ -244,7 +245,6 @@ def update_star_position(celestialObjects, observer, cam):
     Returns: dictionary with updated positions
     '''
     log = logging.getLogger(__name__)
-    print('Observer time:{}'.format(observer.date))
 
     # include moon data
     log.debug('Loading moon')
@@ -306,7 +306,6 @@ def update_star_position(celestialObjects, observer, cam):
         log.error('Using altitude or vmag limit failed!')
         raise
 
-
     # calculate angle to moon
     log.debug('Calculate Angle to Moon')
     stars['angleToMoon'] = stars.apply(lambda x : np.arccos(np.sin(x.altitude)*
@@ -317,6 +316,9 @@ def update_star_position(celestialObjects, observer, cam):
             np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
             np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
 
+    # remove stars and planets that are too close to moon
+    stars.query('angleToMoon > {}'.format(np.deg2rad(float(cam['minAngleToMoon']))), inplace=True)
+
 
     # calculate x and y position
     log.debug('Calculate x and y')
@@ -326,6 +328,7 @@ def update_star_position(celestialObjects, observer, cam):
     sunData['x'], sunData['y'] = horizontal2image(sunData['azimuth'], sunData['altitude'], cam=cam)
 
     return {'stars':stars, 'planets':planets, 'moon': moonData, 'sun': sunData}
+
 
 def findLocalMaxValue(img, x, y, radius):
     '''
@@ -353,6 +356,7 @@ def findLocalMaxValue(img, x, y, radius):
     except ValueError:
         print('Star outside image')
         return 0
+
 
 def findLocalMaxPos(img, x, y, radius):
     '''
@@ -454,13 +458,15 @@ def get_crop_mask(img, crop):
             log.error('Cropping failed, maybe there is a typing error in the config file?')
             raise
         return disk_mask
-    
+
+
 def loadImageTime(filename):
     # assuming that the filename only contains numbers of timestamp
     timestamp = re.findall('\d{2,}', filename)
     timestamp = list(map(int, timestamp))
 
     return datetime(*timestamp)
+
 
 # display fits image on screen
 def dispFits(image):
@@ -474,6 +480,7 @@ def dispFits(image):
     ax.imshow(image, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
     plt.show()
 
+
 def dispHist(image):
     fig = plt.figure()
     ax = fig.add_axes([0.05, 0.05, 0.95, 0.95])
@@ -485,36 +492,43 @@ def dispHist(image):
     plt.hist(image[~np.isnan(image)].ravel(), bins=100, range=(-150,2000))
     plt.show()
 
-def isInRange(position, stars, rng):
+
+def isInRange(position, stars, rng, unit='deg'):
     if rng < 0:
         raise ValueError
-    '''
-    if 'x' in position.keys():
-        return ((position.x - star.x)**2 + (position.y - star.y)**2 <= rng**2)
+    
+    if unit == 'pixel':
+        if type(position) == dict:
+            return ((position.x - stars.x)**2 + (position.y - stars.y)**2 <= rng**2)
+        else:
+            return ((position[0] - stars.x)**2 + (position[1] - stars.y)**2 <= rng**2)
+    elif unit == 'deg':
+        ra2 = stars['ra'].values/12*np.pi
+        dec2 = stars['dec'].values
+        if type(position) == dict:
+            ra1 = position['ra']/12*np.pi
+            dec1 = position['dec']
+        else:
+            ra1 = position[0]/12*np.pi
+            dec1 = position[1]/180*np.pi
+
+        deltaDeg = 2*np.arcsin(np.sqrt(np.sin((dec1-dec2)/2)**2 + np.cos(dec1)*np.cos(dec2)*np.sin((ra1-ra2)/2)**2))
+        return deltaDeg <= np.deg2rad(rng)
     else:
-    '''
-    dec1 = position['dec']
-    dec2 = stars['dec'].values
-    ra1 = position['ra']/12*np.pi
-    ra2 = stars['ra'].values/12*np.pi
-
-    deltaDeg = 2*np.arcsin(np.sqrt(np.sin((dec1-dec2)/2)**2 + np.cos(dec1)*np.cos(dec2)*np.sin((ra1-ra2)/2)**2))
-
-    return deltaDeg <= np.deg2rad(rng)
+        raise ValueError('unit has unknown type')
 
 
-def calc_star_percentage(position, stars, rng, weight=False):
+def calc_star_percentage(position, stars, rng, unit='deg', weight=False):
     '''
     Returns percentage of visible stars that are within range of position
     
-    Position is dictionary and can contain Ra,Dec or x,y
-    Range is degree or pixel radius depending on whether horizontal or pixel coordinates were used
+    Position is dictionary and can contain Ra,Dec and/or x,y
+    Range is degree or pixel radius depending on whether unit is 'grad' or 'pixel'
     '''
-    
     if rng < 0:
         starsInRange = stars
     else:
-        starsInRange = stars[isInRange(position, stars, rng)]
+        starsInRange = stars[isInRange(position, stars, rng, unit)]
 
     try:
         if weight:
@@ -529,6 +543,15 @@ def calc_star_percentage(position, stars, rng, weight=False):
         percentage = -1
 
     return percentage
+
+
+def calc_cloud_map(stars, rng, img_shape, weight=False):
+    cloud_map = np.zeros(img_shape)
+    for i in range(img_shape[0]):
+        for j in range(img_shape[1]):
+            cloud_map[i,j] = calc_star_percentage((i,j), stars, 10, 'pixel', weight)
+    return cloud_map
+
 
 def filter_catalogue(catalogue, rng):
     '''
@@ -565,7 +588,8 @@ def filter_catalogue(catalogue, rng):
         i1 += 1
     return filtered_list
 
-def process_image(images, celestialObjects, config):
+
+def process_image(images, celestialObjects, config, args):
     log = logging.getLogger(__name__)
 
     log.debug('Creating observer')
@@ -602,4 +626,66 @@ def process_image(images, celestialObjects, config):
     stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, 2), axis=1)
     stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, 2), axis=1)
 
+    if args['--ratescan']:
+        log.info('Doing ratescan')
+        gradList = list()
+        sobelList = list()
+        lapList = list()
+
+        response = np.logspace(-4,0,500)
+        for resp in response:
+            labeled, labelCnt = label(grad>resp)
+            stars['visible'] = stars.response > resp
+            gradList.append((calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
+            labeled, labelCnt = label(sobel>resp)
+            stars['visible'] = stars.response2 > resp
+            sobelList.append((calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
+            labeled, labelCnt = label(lap>resp)
+            stars['visible'] = stars.response3 > resp
+            lapList.append((calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
+
+        gradList = np.array(gradList)
+        sobelList = np.array(sobelList)
+        lapList = np.array(lapList)
+
+        #minThresholds = [max(response[l[:,0]==1]) for l in (gradList, sobelList, lapList)]
+
+        minThresholds = -np.array([np.argmax(gradList[::-1,0]), np.argmax(sobelList[::-1,0]), np.argmax(lapList[::-1,0])]) + len(response) -1
+        fig = plt.figure(figsize=(19.2,10.8))
+        ax1 = fig.add_subplot(111)
+        plt.xscale('log')
+        plt.grid()
+        ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
+        ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
+        ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
+        ax1.axvline(response[minThresholds[0]], color='green')
+        ax1.axvline(response[minThresholds[1]], color='blue')
+        ax1.axvline(response[minThresholds[2]], color='red')
+        ax1.set_ylabel('')
+        ax1.legend(loc='center left')
+
+        ax2 = ax1.twinx()
+        #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
+        #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
+        #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
+        ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
+        ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
+        ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
+        ax2.axhline(gradList[minThresholds[0],2], color='green')
+        ax2.axhline(sobelList[minThresholds[1],2], color='blue')
+        ax2.axhline(lapList[minThresholds[2],2], color='red')
+        ax2.legend(loc='upper right')
+        ax2.set_ylim((0,16000))
+
+
+        if args['-s']:
+            plt.savefig('rateScan.pdf')
+        if args['-v']:
+            plt.show()
+        #plt.close()
+    if args['--cloud_map']:
+        cloud_map = calc_cloud_map(stars, 10, img.shape, weight=False)
+        plt.imshow(cloud_map, cmap='gray')
+        plt.show()
+    #del images
     return stars, images
