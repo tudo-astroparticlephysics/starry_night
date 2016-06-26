@@ -12,18 +12,24 @@ setup(
         'starry_night',
         ],
     install_requires=[
-        'pandas',           # in anaconda
-        'scipy',            # in anaconda
-        'pyephem',            # in anaconda
-        #'requests',         # in anaconda
-        'numpy',            # in anaconda
-        'matplotlib>=1.4',  # in anaconda
-        #'python-dateutil',  # in anaconda
-        #'sqlalchemy',       # in anaconda
-        #'PyMySQL',          # in anaconda
-        #'pytz',             # in anaconda
-        #'blessings',
-        'docopt',           # in anaconda
+        'pandas',           
+        'scipy',           
+        'pyephem',        
+        'requests',      
+        'numpy',        
+        'matplotlib>=1.4',
+        'docopt',        
+        'pkg_resources',
+        'logging',
+        'os',
+        'sys',
+        'time',
+        'datetime',
+        'configparser',
+        'skimage',
+        'multiprocessing',
+        'functools',
+        'astropy',
     ],
     test_suite='nose.collector',
     tests_require=['nose'],
