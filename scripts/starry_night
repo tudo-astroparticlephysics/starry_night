@@ -43,7 +43,6 @@ from functools import partial
 from starry_night import skycam
 from IPython import embed
 
-global response
 def wrapper(config, celestialObjects, args, img):
     return skycam.process_image(skycam.getImageDict(img, config), celestialObjects, config, args)
 
@@ -117,7 +116,7 @@ def main(args):
         images = dict({
                 'img': img,
                 'timestamp': datetime.utcnow(),
-                })
+        })
         results.append(
                 skycam.process_image(images, celestialObjects, config)
         )
@@ -149,72 +148,9 @@ def main(args):
             pool.close()
             pool.join()
 
-
-    
-    
-
     #log.info('Filtering catalogue')
     #rem = filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
     
-
-
-
-
-
-
-    if args['-v']:
-        if False:
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-            vmin = np.nanpercentile(image, 0.)
-            vmax = np.nanpercentile(image, 100.)
-            ax.imshow(image,cmap='gray',vmin=vmin,vmax=vmax)
-            
-
-            ax.imshow(images['img'], cmap='gray')
-            
-            plt.show()
-        else:
-            '''
-            for res in results:
-                r = res.result()
-                fig = plt.figure()
-                ax = fig.add_subplot(111)
-                vmin = np.nanpercentile(r[1]['img'], 0.5)
-                vmax = np.nanpercentile(r[1]['img'], 99.5)
-                ax.imshow(r[1]['img'],cmap='gray',vmin=vmin,vmax=vmax)
-                ax.scatter(r[0].x.values, r[0].y.values)
-                print(r[1]['timestamp'])
-                plt.show()
-            '''
-
-
-        '''
-        ax = fig.add_subplot(121)
-        stars.query('visible == True').plot.scatter(ax=ax, x='x', y='y', color='green')
-        stars.query('visible == False').plot.scatter(ax=ax, x='x', y='y', color='red')
-        stars.plot.scatter(x='vmag', y='response2', color='red', grid=True)
-
-        fig = plt.figure()
-        ax = fig.add_subplot(121)
-        ax.imshow(-images['lap']/0.05, cmap='Greys_r', interpolation='none')
-        ax2 = fig.add_subplot(122)
-        ax2.imshow(-images['grad'], cmap='Greys_r', interpolation='none')
-        plt.legend()
-        fig = plt.figure()
-        ax3 = fig.add_subplot(121)
-        ax3.imshow(images['img'], cmap='Greys_r', interpolation='none')
-        ax4 = fig.add_subplot(122)
-        ax4.imshow(images['img'], cmap='Greys_r', interpolation='none')
-        ax.grid()
-        ax2.grid()
-        ax3.grid()
-        ax4.grid()
-
-        fig = plt.figure()
-        plt.hist(images['lap'].flatten(), bins=100, range=(0,0.05))
-        plt.show()
-        '''
     
 
 
