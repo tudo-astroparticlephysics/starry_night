@@ -22,21 +22,19 @@ Options:
 '''
 
 from __future__ import print_function
+from docopt import docopt
 import pkg_resources
 import logging
 import os
 import sys
 import time
-from docopt import docopt
 import matplotlib.pyplot as plt
 from matplotlib import rc
 from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import configparser
-from pkg_resources import resource_filename
 import skimage.filters
-from scipy.ndimage.measurements import label
 from multiprocessing import Pool
 from functools import partial
 
@@ -90,7 +88,7 @@ def main(args):
     # TODO: read config file to obtain URL and stuff
     log.debug('Parsing config file: {}'.format(args['-c']))
     config = configparser.RawConfigParser()
-    config.read(resource_filename(
+    config.read(pkg_resources.resource_filename(
         'starry_night', '../data/{}'.format(args['-c']))
     )
 
@@ -141,7 +139,7 @@ def main(args):
             for img in args['<image>']:
                 results.append(par(img))
         else:
-            pool = Pool()
+            pool = Pool(maxtasksperchild=50)
             # use map now, because we want all results
             #results = pool.imap(par, args['<image>'])
             results = pool.map(par, args['<image>'])
@@ -150,10 +148,9 @@ def main(args):
 
     #log.info('Filtering catalogue')
     #rem = filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
+    embed()
     
     
-
-
 
 ''' Main Loop '''
 if __name__ == '__main__':

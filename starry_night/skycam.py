@@ -9,7 +9,6 @@ import sys
 from scipy.io import matlab
 from skimage.io import imread
 from skimage.color import rgb2gray
-import skimage.filters.rank as rank
 
 from astropy.io import fits
 from datetime import datetime, timedelta
@@ -22,7 +21,6 @@ import requests
 import logging
 
 import re
-from io import BytesIO
 import skimage.filters
 from scipy.ndimage.measurements import label
 from IPython import embed
@@ -262,8 +260,8 @@ def update_star_position(celestialObjects, observer, cam):
     sun = ephem.Sun()
     sun.compute(observer)
     sunData = {
-        'altitude' : np.deg2rad(sun.alt),
-        'azimuth' : np.deg2rad(sun.az),
+        'altitude' : float(sun.alt),
+        'azimuth' : float(sun.az),
     }
 
     # add the planets
@@ -285,8 +283,8 @@ def update_star_position(celestialObjects, observer, cam):
         data = {
             'ra': float(sol_object.a_ra),
             'dec': float(sol_object.a_dec),
-            'gLon': float(galactic.lon)/np.pi*180,
-            'gLat': float(galactic.lat)/np.pi*180,
+            'gLon': float(galactic.lon),
+            'gLat': float(galactic.lat),
             'vmag': float(sol_object.mag),
             'azimuth': float(sol_object.az),
             'altitude': float(sol_object.alt),
@@ -630,6 +628,13 @@ def process_image(images, celestialObjects, config, args):
     observer.date = images['timestamp']
     log.debug('Image time: {}'.format(images['timestamp']))
 
+    # stop processing if sun is too high
+    sun = ephem.Sun()
+    sun.compute(observer)
+    if np.rad2deg(sun.alt) > -10:
+        log.info('Sun too high: {}, time: {}'.format(np.rad2deg(sun.alt), images['timestamp']))
+        return
+
     # create cropping array to mask unneccessary image regions.
     img = images['img']
     crop_mask = get_crop_mask(img, config['crop'])
@@ -652,41 +657,43 @@ def process_image(images, celestialObjects, config, args):
     images['sobel'] = sobel
     images['lap'] = lap
 
+    tolerance = 2
     log.debug('Calculate Filter response')
     stars = pd.concat([stars, stars.apply(
-            lambda s : findLocalMaxPos(lap, s.x, s.y, 10),
-            axis=1)], axis=1)
+            lambda s : findLocalMaxPos(lap, s.x, s.y, tolerance),
+            axis=1)], axis=1
+    )
     stars = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
-    stars['response'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, 10), axis=1)
-    stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, 10), axis=1)
-    stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, 10), axis=1)
+    stars['response1'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
+    stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
+    stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, tolerance), axis=1)
     lim = re.split('\\s*,\\s*', config['image']['visibilitylimit'])
     stars['visible'] = (stars['response3'] > 10**float(lim[0]) / 10**(stars['vmag']*float(lim[1])/5))
+    #stars['visible'] = (stars['response1'] > (13/255)**2)
     ##################################
-
-
-    if args['--response']:        
-        fig = plt.figure(figsize=(4,3))
-        ax = plt.subplot(111)
-        stars.plot.scatter(x='vmag',y='response3',ax=ax, logy=True, grid=True)
-        ax.set_xlim((-1,float(config['image']['vmaglimit'])+0.5))
-        ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response3.values,0.5))//1))
-        ax.set_ylabel('Kernel Response')
-        ax.set_xlabel('Star Magnitude')
-        plt.show()
 
     if args['-v']:
         fig = plt.figure()
         ax = fig.add_subplot(111)
         vmin = np.nanpercentile(img, 0.5)
-        vmax = np.nanpercentile(img, 95.)
+        vmax = np.nanpercentile(img, 99.)
         ax.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
         stars.query('visible').plot.scatter(x='x',y='y', ax=ax, color='green', grid=True)
         stars.query('not visible').plot.scatter(x='x',y='y', ax=ax, color='red', grid=True)
         plt.show()
 
-
-
+    if args['--response']:        
+        fig = plt.figure(figsize=(4,3))
+        ax = plt.subplot(111)
+        ax.axhline(13**2/255**2, color='red', label='old threshold -max')
+        ax.axhline(11**2/255**2, color='red', label='old threshold -min')
+        stars.plot.scatter(x='vmag',y='response1',ax=ax, logy=True, grid=True, label='')
+        ax.set_xlim((-1,float(config['image']['vmaglimit'])+0.5))
+        ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response3.values,0.5))//1-1))
+        ax.legend(loc='best')
+        ax.set_ylabel('Kernel Response')
+        ax.set_xlabel('Star Magnitude')
+        plt.show()
 
     if args['--ratescan']:
         log.info('Doing ratescan')
@@ -697,7 +704,7 @@ def process_image(images, celestialObjects, config, args):
         response = np.logspace(-4,0,500)
         for resp in response:
             labeled, labelCnt = label(grad>resp)
-            stars['visible'] = stars.response > resp
+            stars['visible'] = stars.response1 > resp
             gradList.append((calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
             labeled, labelCnt = label(sobel>resp)
             stars['visible'] = stars.response2 > resp
@@ -725,6 +732,7 @@ def process_image(images, celestialObjects, config, args):
         ax1.axvline(response[minThresholds[0]], color='green')
         ax1.axvline(response[minThresholds[1]], color='blue')
         ax1.axvline(response[minThresholds[2]], color='red')
+        ax1.axvline(14**2/255**2, color='black', label='old threshold')
         ax1.set_ylabel('')
         ax1.legend(loc='center left')
 
@@ -740,20 +748,17 @@ def process_image(images, celestialObjects, config, args):
         ax2.axhline(lapList[minThresholds[2],2], color='red')
         ax2.legend(loc='upper right')
         ax2.set_ylim((0,16000))
-    else:
-        thresh = (np.NaN,np.NaN,np.NaN)
-
-
         if args['-s']:
             plt.savefig('rateScan.pdf')
         if args['-v']:
             plt.show()
-        #plt.close()
+    else:
+        thresh = (np.NaN,np.NaN,np.NaN)
 
     if args['--cloudmap']:
         ax1 = plt.subplot(121)
         vmin = np.nanpercentile(img, 5.5)
-        vmax = np.nanpercentile(img, 95.5)
+        vmax = np.nanpercentile(img, 99.9)
         ax1.imshow(img, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
         stars.query('visible').plot.scatter(x='x',y='y', ax=ax1, color='green', grid=True)
         stars.query('not visible').plot.scatter(x='x',y='y', ax=ax1, color='red', grid=True)
@@ -764,7 +769,6 @@ def process_image(images, celestialObjects, config, args):
         cloud_map1[crop_mask] = 0
         cloud_map2 = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=True)
         cloud_map2[crop_mask] = 0
-        ax1.imshow(img, cmap='gray')
         ax2.imshow(cloud_map1, cmap='gray_r',vmin=0,vmax=1)
         ax2.grid()
         plt.show()
