@@ -58,8 +58,8 @@ logfile_path = os.path.join(
 # create handler for file and console output
 logfile_handler = logging.FileHandler(filename=logfile_path)
 logstream_handler = logging.StreamHandler()
-logfile_handler.setLevel(logging.DEBUG)
-logstream_handler.setLevel(logging.DEBUG)
+logfile_handler.setLevel(logging.INFO)
+logstream_handler.setLevel(logging.INFO)
 formatter = logging.Formatter(
     fmt='%(asctime)s - %(levelname)s - %(name)s | %(message)s',
     datefmt='%H:%M:%S',
@@ -96,7 +96,7 @@ def main(args):
     celestialObjects = skycam.star_planets_sun_moon_dict()
 
     # aquire image(s)
-    output = list()
+    results = list()
     if not args['<image>']:
         # download current image from URL
         singleMode = True
@@ -113,10 +113,11 @@ def main(args):
 
         images = dict({
                 'img': img,
-                'timestamp': datetime.utcnow(),
+                'timestamp': datetime.utcnow() +
+                timedelta(minutes=float(config['properties']['timeoffset']))
         })
         results.append(
-                skycam.process_image(images, celestialObjects, config)
+                skycam.process_image(images, celestialObjects, config, args)
         )
 
 
@@ -135,20 +136,34 @@ def main(args):
 
         # don't use multiprocessing in debug mode
         if args['--debug']:
-            results = list()
             for img in args['<image>']:
                 results.append(par(img))
         else:
             pool = Pool(maxtasksperchild=50)
-            # use map now, because we want all results
-            #results = pool.imap(par, args['<image>'])
             results = pool.map(par, args['<image>'])
             pool.close()
             pool.join()
 
     #log.info('Filtering catalogue')
     #rem = filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
-    embed()
+
+    # drop all 'None' elements (image processing was aborted because of high sun)
+    # and merge the remaining files into one multiindex dataframe
+    i=0
+    while i<len(results):
+        if not results[i]:
+            results.pop(i)
+        else:
+            i+=1
+    star_results = list(map(lambda x: x[0], results))
+    star_timestamps = list(map(lambda x: x[1], results))
+
+    df = pd.concat(star_results, keys=star_timestamps)
+    del star_results
+    del star_timestamps
+    #d.loc[(slice(None), 746), :]
+    #d.loc[(slice(None), 746),:]['response3'].plot.hist(10)
+    #embed()
     
     
 

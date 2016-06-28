@@ -27,6 +27,9 @@ from IPython import embed
 
 
 def downloadImg(url, *args, **kwargs):
+    if url.split('.')[-1]== 'mat':
+        data = matlab.loadmat(filepath)
+        img = data[dictEntry]
     return rgb2gray(imread(url, ))
 
 
@@ -184,15 +187,14 @@ def star_planets_sun_moon_dict():
     log = logging.getLogger(__name__)
     
     log.debug('Loading stars')
-    catalogue = resource_filename('starry_night', '../data/asu.tsv')
-    #catalogue = 
+    catalogue = resource_filename('starry_night', '../data/catalogue_10vmag_1degFilter.csv')
     stars = pd.read_csv(
         catalogue,
-        sep=';',
+        sep=',',
         comment='#',
         header=0,
         skipinitialspace=False,
-        index_col=4,
+        index_col=0,
     )
     stars = stars.convert_objects(convert_numeric=True)
 
@@ -234,7 +236,7 @@ def star_planets_sun_moon_dict():
         })
 
 
-def update_star_position(celestialObjects, observer, cam):
+def update_star_position(celestialObjects, observer, cam, crop):
     '''
     Takes the dictionary from 'star_planets_sun_moon_dict(observer)'
     and calculates the current position of each object in the sky
@@ -325,6 +327,8 @@ def update_star_position(celestialObjects, observer, cam):
     planets['x'], planets['y'] = horizontal2image(planets.azimuth, planets.altitude, cam=cam)
     moonData['x'], moonData['y'] = horizontal2image(moonData['azimuth'], moonData['altitude'], cam=cam)
     sunData['x'], sunData['y'] = horizontal2image(sunData['azimuth'], sunData['altitude'], cam=cam)
+    stars = stars[stars.apply(lambda x, crop=crop: ~crop[int(x['y']), int(x['x'])], axis=1)]
+    planets = planets[planets.apply(lambda x, crop=crop: ~crop[int(x['y']), int(x['x'])], axis=1)]
 
     return {'stars':stars, 'planets':planets, 'moon': moonData, 'sun': sunData}
 
@@ -396,33 +400,23 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     '''
     log = logging.getLogger(__name__)
 
-    #TODO: read image time from mat and fits file
-    # get image time from filename
+    # get image type from filename
     filename = filepath.split('/')[-1].split('.')[0]
     filetype= filepath.split('.')[-1]
-    try:
-        if fmt is None:
-            time = datetime.strptime(filename, config['image']['timeformat'])
-        else:
-            time = datetime.strptime(filename, fmt)
-        time += timedelta(minutes=float(config['properties']['timeoffset']))
-    
-    except ValueError:
-        fmt = (config['image']['timeformat'] if fmt is None else fmt)
-        log.error('{},{}'.format(filename,filepath))
-        log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
-        raise
-        sys.exit(1)
 
     # read mat file
     if filetype == 'mat':
         data = matlab.loadmat(filepath)
-        img = data[dictEntry]
+        img = data['pic1']
+        time = datetime.strptime(
+            data['UTC1'][0], '%Y/%m/%d %H:%M:%S'
+        )
 
     # read fits file
     elif (filetype == 'fits') or (filetype == 'gz'):
         hdulist = fits.open(filepath)
         img = hdulist[0].data
+        time = np.datetime64(hdulist[0].header['TIMEUTC'])
     else:
         # read normal image file
         try:
@@ -430,6 +424,19 @@ def getImageDict(filepath, config, crop=None, fmt=None):
         except (FileNotFoundError, OSError):
             log.error('File {} not found. Or filetype invalid'.format(filename))
             sys.exit(1)
+        try:
+            if fmt is None:
+                time = datetime.strptime(filename, config['image']['timeformat'])
+            else:
+                time = datetime.strptime(filename, fmt)
+        
+        except ValueError:
+            fmt = (config['image']['timeformat'] if fmt is None else fmt)
+            log.error('{},{}'.format(filename,filepath))
+            log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
+            raise
+            sys.exit(1)
+    time += timedelta(minutes=float(config['properties']['timeoffset']))
     return dict({'img': img, 'timestamp': time})
 
     
@@ -444,7 +451,7 @@ def get_crop_mask(img, crop):
             y = re.split('\\s*,\\s*', crop['crop_y'])
             r = re.split('\\s*,\\s*', crop['crop_radius'])
             inside = re.split('\\s*,\\s*', crop['crop_deleteinside'])
-            nrows, ncols = img.shape
+            ncols,nrows = img.shape
             row, col = np.ogrid[:nrows, :ncols]
             disk_mask = np.full((nrows, ncols), False, dtype=bool)
             for x,y,r,inside in zip(x,y,r,inside):
@@ -584,36 +591,30 @@ def filter_catalogue(catalogue, rng):
     '''
     Loop through all possible pairs of stars and remove less bright star if distance is < rng
 
-    Input: Pandas DataFrame and a distance in degree
+    Input:  catalogue - Pandas dataframe (ra and dec in degree)
+            rng - Min distance between stars in degree
 
-    Returns: List of index that got not removed
+    Returns: List of indexes that remain in catalogue
     '''
     log = logging.getLogger(__name__)
     try:
         c = catalogue.sort_values('vmag', ascending=True)
-        reference_list = list(c[['ra','dec']].values)
-        filtered_list = list(c.index)
+        reference = np.deg2rad(c[['ra','dec']].values)
+        index = c.index
     except KeyError:
         log.error('Key not found. Please check that your catalogue is labeled correctly')
         raise
     
-    i1 = 0
-    while i1 < len(reference_list)-1:
-        log.debug('Items left: {}/{}'.format(i1,len(reference_list)-1))
-        row1 = reference_list[i1]
-        pop_index = i1 + 1
-        i2 = i1 +1
-        while i2 < len(reference_list):
-            row2 = reference_list[i2]
-            deltaDeg = np.rad2deg(2*np.arcsin(np.sqrt(np.sin((row1[1]-row2[1])/2)**2 + np.cos(row1[1])*np.cos(row2[1])*np.sin((row1[0]-row2[0])/2)**2)))
-            if deltaDeg < rng:
-                filtered_list.pop(pop_index)
-                reference_list.pop(pop_index)
-            else:
-                pop_index += 1
-                i2 += 1
-        i1 += 1
-    return filtered_list
+    i1 = 0 #star index that is used as filter base
+    while i1 < len(reference)-1:
+        print('Items left: {}/{}'.format(i1,len(reference)-1))
+        deltaDeg = np.rad2deg(2*np.arcsin(np.sqrt(np.sin((reference[i1,1]-reference[:,1])/2)**2 + np.cos(reference[i1,1])*np.cos(reference[:,1])*np.sin((reference[i1,0]-reference[:,0])/2)**2)))
+        keep = deltaDeg > rng
+        keep[:i1+1] = True #don't remove stars that already passed the filter
+        reference = reference[keep]
+        index = index[keep]
+        i1+=1
+    return index
 
 
 def process_image(images, celestialObjects, config, args):
@@ -640,7 +641,7 @@ def process_image(images, celestialObjects, config, args):
     crop_mask = get_crop_mask(img, config['crop'])
 
     # update celestial objects
-    celObjects = update_star_position(celestialObjects, observer, config['image'])
+    celObjects = update_star_position(celestialObjects, observer, config['image'], crop_mask)
     stars = pd.concat([celObjects['stars'], celObjects['planets']])
 
 
@@ -657,7 +658,10 @@ def process_image(images, celestialObjects, config, args):
     images['sobel'] = sobel
     images['lap'] = lap
 
-    tolerance = 2
+    # tolerance is max distance between actual star position and expected star position
+    # this should be a little smaller than 1° because this is the minimum distance
+    # between 2 catalogue stars (catalogue was filtered for this)
+    tolerance = int((float(config['image']['radius'])/90-1)/2) 
     log.debug('Calculate Filter response')
     stars = pd.concat([stars, stars.apply(
             lambda s : findLocalMaxPos(lap, s.x, s.y, tolerance),
@@ -678,8 +682,14 @@ def process_image(images, celestialObjects, config, args):
         vmin = np.nanpercentile(img, 0.5)
         vmax = np.nanpercentile(img, 99.)
         ax.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
-        stars.query('visible').plot.scatter(x='x',y='y', ax=ax, color='green', grid=True)
-        stars.query('not visible').plot.scatter(x='x',y='y', ax=ax, color='red', grid=True)
+        try:
+            stars.query('visible').plot.scatter(x='x',y='y', ax=ax, color='green', grid=True)
+        except TypeError:
+            pass
+        try:
+            stars.query('not visible').plot.scatter(x='x',y='y', ax=ax, color='red', grid=True)
+        except TypeError:
+            pass
         plt.show()
 
     if args['--response']:        
@@ -701,7 +711,7 @@ def process_image(images, celestialObjects, config, args):
         sobelList = list()
         lapList = list()
 
-        response = np.logspace(-4,0,500)
+        response = np.logspace(-4.5,-0.5,200)
         for resp in response:
             labeled, labelCnt = label(grad>resp)
             stars['visible'] = stars.response1 > resp
@@ -747,6 +757,7 @@ def process_image(images, celestialObjects, config, args):
         ax2.axhline(sobelList[minThresholds[1],2], color='blue')
         ax2.axhline(lapList[minThresholds[2],2], color='red')
         ax2.legend(loc='upper right')
+        ax2.set_xlim((min(response), max(response)))
         ax2.set_ylim((0,16000))
         if args['-s']:
             plt.savefig('rateScan.pdf')
@@ -773,8 +784,9 @@ def process_image(images, celestialObjects, config, args):
         ax2.grid()
         plt.show()
 
+    timestamp = images['timestamp']
     del images
     del grad
     del sobel
     del lap
-    return stars, thresh
+    return stars, timestamp, thresh
