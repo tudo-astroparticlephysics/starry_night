@@ -19,22 +19,23 @@ setup(
         'numpy',        
         'matplotlib>=1.4',
         'docopt',        
-        'pkg_resources',
-        'logging',
-        'os',
-        'sys',
-        'time',
-        'datetime',
+        #'pkg_resources',
         'configparser',
-        'skimage',
-        'multiprocessing',
-        'functools',
+        'scikit-image',
         'astropy',
     ],
     test_suite='nose.collector',
     tests_require=['nose'],
     scripts=['scripts/starry_night'],
 
-    package_data={'starry_night': ['data/asu.tsv']},
+    package_data={
+        'starry_night': [
+            'data/catalogue_10vmag_1degFilter.csv',
+            'CTA_cam.config',
+            'GTC_cam.config',
+            'IceCube_cam.config',
+            'Magic_cam.config',
+            ]
+        },
     zip_safe=False
 )
