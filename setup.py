@@ -19,8 +19,7 @@ setup(
         'numpy',        
         'matplotlib>=1.4',
         'docopt',        
-        #'pkg_resources',
-        'configparser',
+        'setuptools',
         'scikit-image',
         'astropy',
     ],
@@ -31,10 +30,10 @@ setup(
     package_data={
         'starry_night': [
             'data/catalogue_10vmag_1degFilter.csv',
-            'CTA_cam.config',
-            'GTC_cam.config',
-            'IceCube_cam.config',
-            'Magic_cam.config',
+            'data/CTA_cam.config',
+            'data/GTC_cam.config',
+            'data/IceCube_cam.config',
+            'data/Magic_cam.config',
             ]
         },
     zip_safe=False

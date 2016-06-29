@@ -14,7 +14,6 @@ from astropy.io import fits
 from datetime import datetime, timedelta
 from time import sleep
 
-from configparser import RawConfigParser
 from pkg_resources import resource_filename
 from os.path import join
 import requests
@@ -28,7 +27,7 @@ from IPython import embed
 
 def downloadImg(url, *args, **kwargs):
     if url.split('.')[-1]== 'mat':
-        data = matlab.loadmat(filepath)
+        data = matlab.loadmat(url)
         img = data[dictEntry]
     return rgb2gray(imread(url, ))
 
@@ -187,7 +186,7 @@ def star_planets_sun_moon_dict():
     log = logging.getLogger(__name__)
     
     log.debug('Loading stars')
-    catalogue = resource_filename('starry_night', '../data/catalogue_10vmag_1degFilter.csv')
+    catalogue = resource_filename('starry_night', 'data/catalogue_10vmag_1degFilter.csv')
     stars = pd.read_csv(
         catalogue,
         sep=',',
@@ -633,7 +632,7 @@ def process_image(images, celestialObjects, config, args):
     sun = ephem.Sun()
     sun.compute(observer)
     if np.rad2deg(sun.alt) > -10:
-        log.info('Sun too high: {}, time: {}'.format(np.rad2deg(sun.alt), images['timestamp']))
+        log.info('Sun too high: {}° above horizon. We start at -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
         return
 
     # create cropping array to mask unneccessary image regions.
