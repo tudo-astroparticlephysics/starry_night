@@ -13,10 +13,11 @@ Options:
     -c Camera       Provide a camera config file or use one of these names: 'GTC', 'Magic' or 'CTA'
     -v              Visual output
     -s              Save output to files
+    --kernel=<k>    Try different kernel sizes
 
     --ratescan      Create ratescan-like plot of visibility threshold
     --response      Show response Magnitude log plot
-    --cloudmap     Create cloud map of the sky
+    --cloudmap      Create cloud map of the sky
     --version       Show version.
     --debug         debug it [default: False]
 '''
@@ -49,32 +50,33 @@ directory = os.path.join(os.environ['HOME'], '.starry_night')
 if not os.path.exists(directory):
     os.makedirs(directory)
 
-# setup logging
-log = logging.getLogger('starry_night')
-log.setLevel(logging.DEBUG)
+# create handler for file and console output
 logfile_path = os.path.join(
     directory, 'starry_night.log'
     )
-# create handler for file and console output
 logfile_handler = logging.FileHandler(filename=logfile_path)
 logstream_handler = logging.StreamHandler()
-logfile_handler.setLevel(logging.INFO)
-logstream_handler.setLevel(logging.INFO)
 formatter = logging.Formatter(
     fmt='%(asctime)s - %(levelname)s - %(name)s | %(message)s',
-    datefmt='%H:%M:%S',
+    datefmt='%Y-%m-%d %H:%M:%S',
 )
 formatter.converter = time.gmtime  # use utc in log
 logfile_handler.setFormatter(formatter)
 logstream_handler.setFormatter(formatter)
-log.addHandler(logfile_handler)
-log.addHandler(logstream_handler)
+
+# setup logging
+logging.basicConfig(
+        handlers = [
+            logfile_handler,
+            logstream_handler,
+            ],
+        level=logging.INFO,
+        )
 logging.captureWarnings(True)
 
 
-
-
 def main(args):
+    log = logging.getLogger('starry_night')
     log.info('starry_night started')
     log.info('version: {}'.format(__version__))
     
@@ -82,9 +84,9 @@ def main(args):
         log.info('DEBUG MODE - NOT FOR REGULAR USE')
         log.setLevel(logging.DEBUG)
         log.debug('started starry_night in debug mode')
-        print(args)
+        # print(args)
 
-    # TODO: read config file to obtain URL and stuff
+    # TODO: read config file
     config = configparser.RawConfigParser()
     if '.' in args['-c'] or '/' in args['-c']:
         log.debug('Parsing config file: {}'.format(args['-c']))
@@ -97,14 +99,14 @@ def main(args):
     log.debug('Parsing Catalogue')
     celestialObjects = skycam.star_planets_sun_moon_dict()
 
-    # aquire image(s)
+    log.debug('Aquire Image(s)')
     results = list()
     if not args['<image>']:
-        # download current image from URL
+        # download current image(s) from URL
         singleMode = True
         log.info('Downloading image from {}'.format(config['properties']['url']))
         try:
-            img = skycam.downloadImg(
+            rawImg = skycam.downloadImg(
                 config['properties']['url'],
                 timeout=5,
             )
@@ -113,18 +115,26 @@ def main(args):
             log.error('Download of image failed')
             raise
 
-        images = dict({
-                'img': img,
-                'timestamp': datetime.utcnow() +
-                timedelta(minutes=float(config['properties']['timeoffset']))
-        })
-        results.append(
-                skycam.process_image(images, celestialObjects, config, args)
-        )
+        for img in rawImg:
+            if type(img) is not dict:
+                images = dict({
+                        'img': img,
+                        'timestamp': datetime.utcnow() +
+                        timedelta(minutes=float(config['properties']['timeoffset']))
+                })
+            else:
+                images = img
+                print(images['timestamp'])
+                images['timestamp'] += timedelta(minutes=float(config['properties']['timeoffset']))
+                print(images['timestamp'])
+
+            results.append(
+                    skycam.process_image(images, celestialObjects, config, args)
+            )
 
 
     else:
-        # use (multiple) image(s) provided by the user
+        # use image(s) provided by the user
         if len(args['<image>']) == 1:
             singleMode = True
             if args['-t'] is not None:
@@ -132,8 +142,8 @@ def main(args):
         else:
             singleMode = False
         imgCount = len(args['<image>'])
-        log.info('Processing {} images.'.format(imgCount))
 
+        log.info('Processing {} images.'.format(imgCount))
         par = partial(wrapper, config, celestialObjects, args)
 
         # don't use multiprocessing in debug mode
@@ -145,9 +155,6 @@ def main(args):
             results = pool.map(par, args['<image>'])
             pool.close()
             pool.join()
-
-    #log.info('Filtering catalogue')
-    #rem = filter_catalogue(stars, rng = float(config['image']['minAngleBetweenStars']))
 
     # drop all 'None' elements (image processing was aborted because of high sun)
     # and merge the remaining files into one multiindex dataframe
@@ -168,7 +175,7 @@ def main(args):
     del star_timestamps
     #d.loc[(slice(None), 746), :]
     #d.loc[(slice(None), 746),:]['response3'].plot.hist(10)
-    #embed()
+    embed()
     
     
 
@@ -181,6 +188,6 @@ if __name__ == '__main__':
     try:
         main(args)
     except (KeyboardInterrupt, SystemExit):
-        log.info('Exit')
+        logging.getLogger().info('Exit')
     except:
         raise

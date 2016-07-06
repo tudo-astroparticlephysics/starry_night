@@ -7,6 +7,7 @@ import ephem
 import sys
 
 from scipy.io import matlab
+from io import BytesIO
 from skimage.io import imread
 from skimage.color import rgb2gray
 
@@ -27,9 +28,31 @@ from IPython import embed
 
 def downloadImg(url, *args, **kwargs):
     if url.split('.')[-1]== 'mat':
-        data = matlab.loadmat(url)
-        img = data[dictEntry]
-    return rgb2gray(imread(url, ))
+        ret = requests.get(url)
+        data = matlab.loadmat(BytesIO(ret.content))
+        imgList = list()
+        timeList = list()
+        outList = list()
+        for d in list(data.values()):
+            try:
+                if d.shape[0] > 100 and d.shape[1] > 100:
+                    imgList.append(d)
+            except AttributeError:
+                pass
+            try:
+                timeList.append(datetime.strptime(d[0], '%Y/%m/%d %H:%M:%S'))
+            except (IndexError, TypeError, ValueError):
+                pass
+        
+        for img, t in zip(imgList,timeList):
+            outList.append(dict({
+                'img' : img,
+                'timestamp' : t,
+                })
+            )
+
+        return outList
+    return [rgb2gray(imread(url, ))]
 
 
 def get_last_modified(url, *args, **kwargs):
@@ -195,7 +218,7 @@ def star_planets_sun_moon_dict():
         skipinitialspace=False,
         index_col=0,
     )
-    stars = stars.convert_objects(convert_numeric=True)
+    #stars = stars.to_numeric()
 
     # transform degrees to radians
     stars.ra = np.deg2rad(stars.ra)
@@ -413,9 +436,12 @@ def getImageDict(filepath, config, crop=None, fmt=None):
 
     # read fits file
     elif (filetype == 'fits') or (filetype == 'gz'):
-        hdulist = fits.open(filepath)
+        hdulist = fits.open(filepath, ignore_missing_end=True)
         img = hdulist[0].data
-        time = np.datetime64(hdulist[0].header['TIMEUTC'])
+        time = datetime.strptime(
+            hdulist[0].header['TIMEUTC'],
+            '%Y-%m-%d %H:%M:%S'
+        )
     else:
         # read normal image file
         try:
@@ -450,7 +476,7 @@ def get_crop_mask(img, crop):
             y = re.split('\\s*,\\s*', crop['crop_y'])
             r = re.split('\\s*,\\s*', crop['crop_radius'])
             inside = re.split('\\s*,\\s*', crop['crop_deleteinside'])
-            ncols,nrows = img.shape
+            nrows,ncols = img.shape
             row, col = np.ogrid[:nrows, :ncols]
             disk_mask = np.full((nrows, ncols), False, dtype=bool)
             for x,y,r,inside in zip(x,y,r,inside):
@@ -623,7 +649,8 @@ def process_image(images, celestialObjects, config, args):
     '''
     log = logging.getLogger(__name__)
 
-    log.debug('Creating observer')
+
+    log.info('Creating observer')
     observer = obs_setup(config['properties'])
     observer.date = images['timestamp']
     log.debug('Image time: {}'.format(images['timestamp']))
@@ -641,39 +668,65 @@ def process_image(images, celestialObjects, config, args):
 
     # update celestial objects
     celObjects = update_star_position(celestialObjects, observer, config['image'], crop_mask)
-    stars = pd.concat([celObjects['stars'], celObjects['planets']])
+    all_stars = pd.concat([celObjects['stars'], celObjects['planets']])
 
+    if args['--kernel']:
+        kernelSize = np.arange(1, int(args['--kernel'])+1, 5)
+    else:
+        kernelSize = [float(config['image']['kernelsize'])]
 
-    log.debug('Apply image filters')
-    grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
-    sobel = skimage.filters.sobel(img).clip(min=0)
-    gauss = skimage.filters.gaussian(img, sigma=1)
-    lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
-    grad[crop_mask] = 0
-    sobel[crop_mask] = 0
-    lap[crop_mask] = 0
+    kernelResults = list()
 
-    images['grad'] = grad
-    images['sobel'] = sobel
-    images['lap'] = lap
+    for k in kernelSize:
+        log.debug('Apply image filters. Kernelsize = {}'.format(k))
 
-    # tolerance is max distance between actual star position and expected star position
-    # this should be a little smaller than 1° because this is the minimum distance
-    # between 2 catalogue stars (catalogue was filtered for this)
-    tolerance = int((float(config['image']['radius'])/90-1)/2) 
-    log.debug('Calculate Filter response')
-    stars = pd.concat([stars, stars.apply(
-            lambda s : findLocalMaxPos(lap, s.x, s.y, tolerance),
-            axis=1)], axis=1
-    )
-    stars = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
-    stars['response1'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
-    stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
-    stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, tolerance), axis=1)
-    lim = re.split('\\s*,\\s*', config['image']['visibilitylimit'])
-    stars['visible'] = (stars['response3'] > 10**float(lim[0]) / 10**(stars['vmag']*float(lim[1])/5))
-    #stars['visible'] = (stars['response1'] > (13/255)**2)
+        # work on a copy if this is a loop
+        if args['--kernel']:
+            stars = all_stars.copy()
+        else:
+            stars = all_stars
+         
+        
+        grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
+        sobel = skimage.filters.sobel(img).clip(min=0)
+        gauss = skimage.filters.gaussian(img, sigma=k)
+        lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+        grad[crop_mask] = 0
+        sobel[crop_mask] = 0
+        #lap[crop_mask] = 0
+
+        images['grad'] = grad
+        images['sobel'] = sobel
+        images['lap'] = lap
+
+        # tolerance is max distance between actual star position and expected star position
+        # this should be a little smaller than 1° because this is the minimum distance
+        # between 2 catalogue stars (catalogue was filtered for this)
+        tolerance = int((float(config['image']['radius'])/90-1)/2) 
+        log.debug('Calculate Filter response')
+        
+        # drop old maxX maxY value (if any) and calculate them again
+        stars = pd.concat([stars.drop(['maxX','maxY'], errors='ignore', axis=1), stars.apply(
+                lambda s : findLocalMaxPos(lap, s.x, s.y, tolerance),
+                axis=1)], axis=1
+        )
+
+        # drop stars that got mistaken for a brighter neighboor
+        stars = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
+
+        #calculate response
+        stars['response1'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
+        stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
+        stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, tolerance), axis=1)
+        lim = re.split('\\s*,\\s*', config['image']['visibilitylimit'])
+        stars['visible'] = (stars['response3'] > 10**float(lim[0]) / 10**(stars['vmag']*float(lim[1])/5))
+        kernelResults.append(stars)
+        #stars['visible'] = (stars['response1'] > (13/255)**2)
     ##################################
+    try:
+        df = pd.concat(kernelResults, keys=kernelSize)
+    except ValueError:
+        df = kernelResults[0]
 
     if args['-v']:
         fig = plt.figure()
@@ -698,7 +751,9 @@ def process_image(images, celestialObjects, config, args):
         ax.axhline(11**2/255**2, color='red', label='old threshold -min')
         stars.plot.scatter(x='vmag',y='response1',ax=ax, logy=True, grid=True, label='')
         ax.set_xlim((-1,float(config['image']['vmaglimit'])+0.5))
-        ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response3.values,0.5))//1-1))
+        #lower = np.log10(np.nanpercentile(stars.response3.values,0.5))np.log10(np.nanpercentile(stars.response3.values,0.5))
+        #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response3.values,0.5))//1-1), 
+        #        top=10**(np.log10(np.nanpercentile(stars.response3.values,99.5))//1-1))
         ax.legend(loc='best')
         ax.set_ylabel('Kernel Response')
         ax.set_xlabel('Star Magnitude')
