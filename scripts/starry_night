@@ -91,11 +91,15 @@ def main(args):
     config = configparser.RawConfigParser()
     log.debug('Parsing config file: {}'.format(args['-c']))
     if '.' in args['-c'] or '/' in args['-c']:
-        config.read(args['-c'])
+        c = len(config.read(args['-c']))
     else:
-        config.read(pkg_resources.resource_filename(
+        c = len(config.read(pkg_resources.resource_filename(
             'starry_night', 'data/{}_cam.config'.format(args['-c']))
-        )
+        ))
+    
+    if c == 0:
+        log.error('Unable to parse config file. Does the file exist?')
+        sys.exit(1)
 
     log.debug('Parsing Catalogue')
     celestialObjects = skycam.star_planets_sun_moon_dict()
