@@ -14,6 +14,8 @@ Options:
     -v              Visual output
     -s              Save output to files
     --kernel=<k>    Try different kernel sizes
+    --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG', 'All')
+                    Using option '--ratescan' implies 'LoG'. [default: LoG]
 
     --ratescan      Create ratescan-like plot of visibility threshold
     --response      Show response Magnitude log plot
@@ -84,12 +86,11 @@ def main(args):
         log.info('DEBUG MODE - NOT FOR REGULAR USE')
         log.setLevel(logging.DEBUG)
         log.debug('started starry_night in debug mode')
-        # print(args)
+        #print(args)
 
-    # TODO: read config file
     config = configparser.RawConfigParser()
+    log.debug('Parsing config file: {}'.format(args['-c']))
     if '.' in args['-c'] or '/' in args['-c']:
-        log.debug('Parsing config file: {}'.format(args['-c']))
         config.read(args['-c'])
     else:
         config.read(pkg_resources.resource_filename(
@@ -165,19 +166,45 @@ def main(args):
         else:
             i+=1
 
-    if len(results) == 0:
+    # no more processing if one or less images were processed successfully
+    if len(results) <= 1:
         sys.exit(0)
     star_results = list(map(lambda x: x[0], results))
     star_timestamps = list(map(lambda x: x[1], results))
 
     df = pd.concat(star_results, keys=star_timestamps)
+    del results
     del star_results
     del star_timestamps
     #d.loc[(slice(None), 746), :]
     #d.loc[(slice(None), 746),:]['response3'].plot.hist(10)
+
+    mean = df.mean(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
+    std = df.std(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
+
+
+    if args['--response']:
+        fig = plt.figure(figsize=(16,9))
+        ax = plt.subplot(111)
+        #ax.axhline(13**2/255**2, color='red', label='old threshold -max')
+        #ax.axhline(11**2/255**2, color='red', label='old threshold -min')
+        mean.plot.scatter(x='vmag',y='response3', yerr=std['response3'].values,ax=ax, logy=True, grid=True, label='Kernel Response')
+        ax.set_xlim((-1,float(config['image']['vmaglimit'])+0.5))
+        ax.set_ylim((1e-3,1e3))
+        #lower = np.log10(np.nanpercentile(stars.response3.values,0.5))np.log10(np.nanpercentile(stars.response3.values,0.5))
+        #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response3.values,0.5))//1-1),
+        #        top=10**(np.log10(np.nanpercentile(stars.response3.values,99.5))//1-1))
+        ax.legend(loc='best')
+        ax.set_ylabel('Kernel Response')
+        ax.set_xlabel('Star Magnitude')
+        if args['-s']:
+            plt.savefig('response_mean.pdf')
+        if args['-v']:
+            plt.show()
+        plt.close('all')
+    
+    
     embed()
-    
-    
 
 ''' Main Loop '''
 if __name__ == '__main__':

@@ -274,9 +274,9 @@ def update_star_position(celestialObjects, observer, cam, crop):
     moon = ephem.Moon()
     moon.compute(observer)
     moonData = {
-        'moonPhase' : moon.moon_phase,
-        'altitude' : np.deg2rad(moon.alt),
-        'azimuth' : np.deg2rad(moon.az),
+        'moonPhase' : float(moon.moon_phase),
+        'altitude' : float(moon.alt),
+        'azimuth' : float(moon.az),
     }
 
     # include sun data
@@ -331,16 +331,16 @@ def update_star_position(celestialObjects, observer, cam, crop):
 
     # calculate angle to moon
     log.debug('Calculate Angle to Moon')
-    stars['angleToMoon'] = stars.apply(lambda x : np.arccos(np.sin(x.altitude)*
-        np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
-        np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
-    if not planets.empty:
-        planets['angleToMoon'] = planets.apply(lambda x : np.arccos(np.sin(x.altitude)*
-            np.sin(moon.alt) + np.cos(x.altitude)*np.cos(moon.alt)*
-            np.cos((x.azimuth - moon.az)) )/np.pi*180, axis=1)
+    stars['angleToMoon'] = np.arccos(np.sin(stars.altitude.values)*
+        np.sin(moon.alt) + np.cos(stars.altitude.values)*np.cos(moon.alt)*
+        np.cos((stars.azimuth.values - moon.az)))
+    planets['angleToMoon'] = np.arccos(np.sin(planets.altitude.values)*
+        np.sin(moon.alt) + np.cos(planets.altitude.values)*np.cos(moon.alt)*
+        np.cos((planets.azimuth.values - moon.az)))
 
     # remove stars and planets that are too close to moon
     stars.query('angleToMoon > {}'.format(np.deg2rad(float(cam['minAngleToMoon']))), inplace=True)
+    planets.query('angleToMoon > {}'.format(np.deg2rad(float(cam['minAngleToMoon']))), inplace=True)
 
 
     # calculate x and y position
@@ -650,10 +650,9 @@ def process_image(images, celestialObjects, config, args):
     log = logging.getLogger(__name__)
 
 
-    log.info('Creating observer')
+    log.info('Processing image take at: {}'.format(images['timestamp']))
     observer = obs_setup(config['properties'])
     observer.date = images['timestamp']
-    log.debug('Image time: {}'.format(images['timestamp']))
 
     # stop processing if sun is too high
     sun = ephem.Sun()
@@ -686,18 +685,31 @@ def process_image(images, celestialObjects, config, args):
         else:
             stars = all_stars
          
-        
-        grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
-        sobel = skimage.filters.sobel(img).clip(min=0)
         gauss = skimage.filters.gaussian(img, sigma=k)
-        lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
-        grad[crop_mask] = 0
-        sobel[crop_mask] = 0
-        #lap[crop_mask] = 0
+        if args['--function'] == 'All' or args['--ratescan']:
+            grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
+            sobel = skimage.filters.sobel(img).clip(min=0)
+            lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+            grad[crop_mask] = 0
+            sobel[crop_mask] = 0
+            lap[crop_mask] = 0
+            images['grad'] = grad
+            images['sobel'] = sobel
+            images['lap'] = lap
+            response_img = lap
+        elif args['--function'] == 'LoG':
+            response_img = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+        elif args['--function'] == 'Grad':
+            response_img = ((img - np.roll(img, 1, axis=0)).clip(min=0))**2 + ((img - np.roll(img, 1, axis=1)).clip(min=0))**2
+        elif args['--function'] == 'Sobel':
+            response_img = skimage.filters.sobel(img).clip(min=0)
+        else:
+            log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
+            sys.exit(1)
+        response_img[crop_mask] = 0
+        images['response'] = response_img
 
-        images['grad'] = grad
-        images['sobel'] = sobel
-        images['lap'] = lap
+
 
         # tolerance is max distance between actual star position and expected star position
         # this should be a little smaller than 1° because this is the minimum distance
@@ -707,7 +719,7 @@ def process_image(images, celestialObjects, config, args):
         
         # drop old maxX maxY value (if any) and calculate them again
         stars = pd.concat([stars.drop(['maxX','maxY'], errors='ignore', axis=1), stars.apply(
-                lambda s : findLocalMaxPos(lap, s.x, s.y, tolerance),
+                lambda s : findLocalMaxPos(response_img, s.x, s.y, tolerance),
                 axis=1)], axis=1
         )
 
@@ -715,11 +727,9 @@ def process_image(images, celestialObjects, config, args):
         stars = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
 
         #calculate response
-        stars['response1'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
-        stars['response2'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
-        stars['response3'] = stars.apply(lambda s : findLocalMaxValue(lap, s.x, s.y, tolerance), axis=1)
+        stars['response'] = stars.apply(lambda s : findLocalMaxValue(response_img, s.x, s.y, tolerance), axis=1)
         lim = re.split('\\s*,\\s*', config['image']['visibilitylimit'])
-        stars['visible'] = (stars['response3'] > 10**float(lim[0]) / 10**(stars['vmag']*float(lim[1])/5))
+        stars['visible'] = (stars['response'] > 10**float(lim[0]) / 10**(stars['vmag']*float(lim[1])/5))
         kernelResults.append(stars)
         #stars['visible'] = (stars['response1'] > (13/255)**2)
     ##################################
@@ -728,97 +738,107 @@ def process_image(images, celestialObjects, config, args):
     except ValueError:
         df = kernelResults[0]
 
-    if args['-v']:
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        vmin = np.nanpercentile(img, 0.5)
-        vmax = np.nanpercentile(img, 99.)
-        ax.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
-        try:
-            stars.query('visible').plot.scatter(x='x',y='y', ax=ax, color='green', grid=True)
-        except TypeError:
-            pass
-        try:
-            stars.query('not visible').plot.scatter(x='x',y='y', ax=ax, color='red', grid=True)
-        except TypeError:
-            pass
-        plt.show()
-
-    if args['--response']:        
-        fig = plt.figure(figsize=(4,3))
-        ax = plt.subplot(111)
-        ax.axhline(13**2/255**2, color='red', label='old threshold -max')
-        ax.axhline(11**2/255**2, color='red', label='old threshold -min')
-        stars.plot.scatter(x='vmag',y='response1',ax=ax, logy=True, grid=True, label='')
-        ax.set_xlim((-1,float(config['image']['vmaglimit'])+0.5))
-        #lower = np.log10(np.nanpercentile(stars.response3.values,0.5))np.log10(np.nanpercentile(stars.response3.values,0.5))
-        #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response3.values,0.5))//1-1), 
-        #        top=10**(np.log10(np.nanpercentile(stars.response3.values,99.5))//1-1))
-        ax.legend(loc='best')
-        ax.set_ylabel('Kernel Response')
-        ax.set_xlabel('Star Magnitude')
-        plt.show()
-
-    if args['--ratescan']:
-        log.info('Doing ratescan')
-        gradList = list()
-        sobelList = list()
-        lapList = list()
-
-        response = np.logspace(-4.5,-0.5,200)
-        for resp in response:
-            labeled, labelCnt = label(grad>resp)
-            stars['visible'] = stars.response1 > resp
-            gradList.append((calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
-            labeled, labelCnt = label(sobel>resp)
-            stars['visible'] = stars.response2 > resp
-            sobelList.append((calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
-            labeled, labelCnt = label(lap>resp)
-            stars['visible'] = stars.response3 > resp
-            lapList.append((calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
-
-        gradList = np.array(gradList)
-        sobelList = np.array(sobelList)
-        lapList = np.array(lapList)
-
-        #minThresholds = [max(response[l[:,0]==1]) for l in (gradList, sobelList, lapList)]
-
-        minThresholds = -np.array([np.argmax(gradList[::-1,0]), np.argmax(sobelList[::-1,0]), np.argmax(lapList[::-1,0])]) + len(response) -1
-        clusters = (gradList[minThresholds[0],2], sobelList[minThresholds[1],2], lapList[minThresholds[2],2])
-        thresh = (response[minThresholds[0]], response[minThresholds[1]],response[minThresholds[2]])
-        fig = plt.figure(figsize=(19.2,10.8))
-        ax1 = fig.add_subplot(111)
-        plt.xscale('log')
-        plt.grid()
-        ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
-        ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
-        ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
-        ax1.axvline(response[minThresholds[0]], color='green')
-        ax1.axvline(response[minThresholds[1]], color='blue')
-        ax1.axvline(response[minThresholds[2]], color='red')
-        ax1.axvline(14**2/255**2, color='black', label='old threshold')
-        ax1.set_ylabel('')
-        ax1.legend(loc='center left')
-
-        ax2 = ax1.twinx()
-        #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
-        #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
-        #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
-        ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
-        ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
-        ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
-        ax2.axhline(gradList[minThresholds[0],2], color='green')
-        ax2.axhline(sobelList[minThresholds[1],2], color='blue')
-        ax2.axhline(lapList[minThresholds[2],2], color='red')
-        ax2.legend(loc='upper right')
-        ax2.set_xlim((min(response), max(response)))
-        ax2.set_ylim((0,16000))
-        if args['-s']:
-            plt.savefig('rateScan.pdf')
+    if args['--debug']:
         if args['-v']:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            vmin = np.nanpercentile(img, 0.5)
+            vmax = np.nanpercentile(img, 99.)
+            ax.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
+            try:
+                stars.query('visible').plot.scatter(x='x',y='y', ax=ax, color='green', grid=True)
+            except TypeError:
+                pass
+            try:
+                stars.query('not visible').plot.scatter(x='x',y='y', ax=ax, color='red', grid=True)
+            except TypeError:
+                pass
             plt.show()
-    else:
-        thresh = (np.NaN,np.NaN,np.NaN)
+
+        if args['--response']:
+            fig = plt.figure(figsize=(16,9))
+            ax = plt.subplot(111)
+            #ax.axhline(13**2/255**2, color='red', label='old threshold -max')
+            #ax.axhline(11**2/255**2, color='red', label='old threshold -min')
+            stars.plot.scatter(x='vmag',y='response',ax=ax, logy=True, grid=True, label='')
+            ax.set_xlim((-1,float(config['image']['vmaglimit'])+0.5))
+            ax.set_ylim((1e-3,1e3))
+            #lower = np.log10(np.nanpercentile(stars.response.values,0.5))np.log10(np.nanpercentile(stars.response.values,0.5))
+            #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response.values,0.5))//1-1),
+            #        top=10**(np.log10(np.nanpercentile(stars.response.values,99.5))//1-1))
+            ax.legend(loc='best')
+            ax.set_ylabel('Kernel Response')
+            ax.set_xlabel('Star Magnitude')
+            if args['-s']:
+                plt.savefig('response_{}.pdf'.format(images['timestamp'].isoformat()))
+            if args['-v']:
+                plt.show()
+            plt.close('all')
+
+        if args['--ratescan']:
+            log.info('Doing ratescan')
+            stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
+            stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
+            gradList = list()
+            sobelList = list()
+            lapList = list()
+
+            response = np.logspace(-4.5,-0.5,200)
+            for resp in response:
+                labeled, labelCnt = label(grad>resp)
+                stars['visible'] = stars.response_grad > resp
+                gradList.append((calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
+                labeled, labelCnt = label(sobel>resp)
+                stars['visible'] = stars.response_sobel > resp
+                sobelList.append((calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
+                labeled, labelCnt = label(lap>resp)
+                stars['visible'] = stars.response > resp
+                lapList.append((calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
+
+            gradList = np.array(gradList)
+            sobelList = np.array(sobelList)
+            lapList = np.array(lapList)
+
+            #minThresholds = [max(response[l[:,0]==1]) for l in (gradList, sobelList, lapList)]
+
+            minThresholds = -np.array([np.argmax(gradList[::-1,0]), np.argmax(sobelList[::-1,0]), np.argmax(lapList[::-1,0])]) + len(response) -1
+            clusters = (gradList[minThresholds[0],2], sobelList[minThresholds[1],2], lapList[minThresholds[2],2])
+            thresh = (response[minThresholds[0]], response[minThresholds[1]],response[minThresholds[2]])
+            fig = plt.figure(figsize=(19.2,10.8))
+            ax1 = fig.add_subplot(111)
+            plt.xscale('log')
+            plt.grid()
+            ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
+            ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
+            ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
+            ax1.axvline(response[minThresholds[0]], color='green')
+            ax1.axvline(response[minThresholds[1]], color='blue')
+            ax1.axvline(response[minThresholds[2]], color='red')
+            ax1.axvline(14**2/255**2, color='black', label='old threshold')
+            ax1.set_ylabel('')
+            ax1.legend(loc='center left')
+
+            ax2 = ax1.twinx()
+            #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
+            #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
+            #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
+            ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
+            ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
+            ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
+            ax2.axhline(gradList[minThresholds[0],2], color='green')
+            ax2.axhline(sobelList[minThresholds[1],2], color='blue')
+            ax2.axhline(lapList[minThresholds[2],2], color='red')
+            ax2.legend(loc='upper right')
+            ax2.set_xlim((min(response), max(response)))
+            ax2.set_ylim((0,16000))
+            if args['-v']:
+                plt.show()
+            if args['-s']:
+                plt.savefig('rateScan.pdf')
+            plt.close('all')
+            del grad
+            del sobel
+            del lap
 
     if args['--cloudmap']:
         ax1 = plt.subplot(121)
@@ -840,7 +860,7 @@ def process_image(images, celestialObjects, config, args):
 
     timestamp = images['timestamp']
     del images
-    del grad
-    del sobel
-    del lap
-    return stars, timestamp, thresh
+    try:
+        return stars, timestamp, thresh
+    except UnboundLocalError:
+        return stars, timestamp, (np.NaN,np.NaN,np.NaN)
