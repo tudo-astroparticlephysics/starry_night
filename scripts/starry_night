@@ -17,8 +17,9 @@ Options:
     --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG', 'All')
                     Using option '--ratescan' implies 'LoG'. [default: LoG]
 
+    --cam           Show camera image
     --ratescan      Create ratescan-like plot of visibility threshold
-    --response      Show response Magnitude log plot
+    --response      Plot response vs Magnitude in log scale 
     --cloudmap      Create cloud map of the sky
     --version       Show version.
     --debug         debug it [default: False]
@@ -40,6 +41,8 @@ import configparser
 import skimage.filters
 from multiprocessing import Pool
 from functools import partial
+from scipy.optimize import curve_fit
+from re import split
 
 from starry_night import skycam
 from IPython import embed
@@ -96,7 +99,6 @@ def main(args):
         c = len(config.read(pkg_resources.resource_filename(
             'starry_night', 'data/{}_cam.config'.format(args['-c']))
         ))
-    
     if c == 0:
         log.error('Unable to parse config file. Does the file exist?')
         sys.exit(1)
@@ -137,7 +139,6 @@ def main(args):
                     skycam.process_image(images, celestialObjects, config, args)
             )
 
-
     else:
         # use image(s) provided by the user
         if len(args['<image>']) == 1:
@@ -171,12 +172,12 @@ def main(args):
             i+=1
 
     # no more processing if one or less images were processed successfully
-    if len(results) <= 1:
-        sys.exit(0)
+    #if len(results) <= 1:
+    #    sys.exit(0)
     star_results = list(map(lambda x: x[0], results))
     star_timestamps = list(map(lambda x: x[1], results))
 
-    df = pd.concat(star_results, keys=star_timestamps)
+    df = pd.concat(star_results, keys=star_timestamps, names=['date','HIP'])
     del results
     del star_results
     del star_timestamps
@@ -186,29 +187,58 @@ def main(args):
     mean = df.mean(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
     std = df.std(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
 
+    def logf(x, m, b):
+        return 10**(m*x+b)
+
+    fit_stars = df.query('0 < vmag < {}'.format(float(config['image']['vmaglimit'])))
+    popt, pcov = curve_fit(logf, fit_stars.vmag.values, fit_stars.response.values, sigma=1/fit_stars.vmag.values, p0=(-0.2, 2))
+    x = np.linspace(-3+fit_stars.vmag.min(), fit_stars.vmag.max(), 20)
+    y = logf(x, popt[0], popt[1]-0.3)
+    lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
+    y1 = 10**(x*float(lim[1][0]) + float(lim[1][1]))
+    y2 = 10**(x*float(lim[0][0]) + float(lim[0][1]))
+    sys.exit(0)
+
 
     if args['--response']:
         fig = plt.figure(figsize=(16,9))
         ax = plt.subplot(111)
-        #ax.axhline(13**2/255**2, color='red', label='old threshold -max')
-        #ax.axhline(11**2/255**2, color='red', label='old threshold -min')
-        mean.plot.scatter(x='vmag',y='response3', yerr=std['response3'].values,ax=ax, logy=True, grid=True, label='Kernel Response')
-        ax.set_xlim((-1,float(config['image']['vmaglimit'])+0.5))
-        ax.set_ylim((1e-3,1e3))
-        #lower = np.log10(np.nanpercentile(stars.response3.values,0.5))np.log10(np.nanpercentile(stars.response3.values,0.5))
-        #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response3.values,0.5))//1-1),
-        #        top=10**(np.log10(np.nanpercentile(stars.response3.values,99.5))//1-1))
+        ax.axhspan(ymin=11**2/255**2, ymax=13**2/255**2, color='red', alpha=0.5, label='Old threshold - Gradient')
+        mean.plot.scatter(x='vmag',y='response', yerr=std['response'].values, color='blue', ax=ax, logy=True, grid=True, vmin=0, vmax=1, label='{} Response'.format(args['--function']))
+        #mean.plot.scatter(x='vmag',y='response_grad', yerr=std['response_grad'].values, color='red', ax=ax, logy=True, grid=True, label='Gradient Response')
+        #ax.set_xlim((-1, max(mean['vmag'])+0.5))
+        ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(mean.response.values,10.0))//1-1),
+            top=10**(np.log10(np.nanpercentile(mean.response.values,99.9))//1+1))
+        ax.plot(x,y)
+        ax.plot(x,y1)
+        ax.plot(x,y2)
         ax.legend(loc='best')
         ax.set_ylabel('Kernel Response')
         ax.set_xlabel('Star Magnitude')
+        plt.show()
         if args['-s']:
-            plt.savefig('response_mean.pdf')
+            plt.savefig('response_{}_mean.pdf'.format(args['--function']))
         if args['-v']:
             plt.show()
         plt.close('all')
     
     
-    embed()
+
+    fig = plt.figure(figsize=(16,9))
+    ax = plt.subplot(111)
+    #if args['--function'] == 'Grad':
+    #ax.axhspan(ymin=11**2/255**2, ymax=13**2/255**2, color='red', alpha=0.5, label='old threshold range')
+    df.loc[df.index.get_level_values(0).unique()[0]].plot.scatter(
+            x='vmag',y='response', color='green', ax=ax, logy=True, grid=True, label='Kernel Response - no Moon')
+    df.loc[df.index.get_level_values(0).unique()[1]].plot.scatter(
+            x='vmag',y='response', color='red', ax=ax, logy=True, grid=True, label='Kernel Response - Moon')
+    df.loc[df.index.get_level_values(0).unique()[2]].plot.scatter(
+            x='vmag',y='response', color='k', ax=ax, logy=True, grid=True, label='Kernel Response - cloud')
+    ax.set_ylim((1e-5,1))
+    plt.show()
+
+
+
 
 ''' Main Loop '''
 if __name__ == '__main__':

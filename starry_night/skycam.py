@@ -1,6 +1,7 @@
 import numpy as np
 from numpy import sin, cos, tan, arctan2, arcsin, pi
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid.inset_locator import inset_axes
 
 import pandas as pd
 import ephem
@@ -20,7 +21,7 @@ from os.path import join
 import requests
 import logging
 
-import re
+from re import split
 import skimage.filters
 from scipy.ndimage.measurements import label
 from IPython import embed
@@ -447,7 +448,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
         try:
             img = imread(filepath, mode='L', as_grey=True)
         except (FileNotFoundError, OSError):
-            log.error('File {} not found. Or filetype invalid'.format(filename))
+            log.error('File \'{}\' not found. Or filetype invalid'.format(filename))
             sys.exit(1)
         try:
             if fmt is None:
@@ -472,10 +473,10 @@ def get_crop_mask(img, crop):
     '''
     if crop is not None:
         try:
-            x = re.split('\\s*,\\s*', crop['crop_x'])
-            y = re.split('\\s*,\\s*', crop['crop_y'])
-            r = re.split('\\s*,\\s*', crop['crop_radius'])
-            inside = re.split('\\s*,\\s*', crop['crop_deleteinside'])
+            x = split('\\s*,\\s*', crop['crop_x'])
+            y = split('\\s*,\\s*', crop['crop_y'])
+            r = split('\\s*,\\s*', crop['crop_radius'])
+            inside = split('\\s*,\\s*', crop['crop_deleteinside'])
             nrows,ncols = img.shape
             row, col = np.ogrid[:nrows, :ncols]
             disk_mask = np.full((nrows, ncols), False, dtype=bool)
@@ -563,11 +564,11 @@ def calc_star_percentage(position, stars, rng, unit='deg', weight=False):
 
     try:
         if weight:
-            vis = np.sum(np.pow(100**(1/5),starsInRange.query('visible').vmag.values))
-            notVis = np.sum(np.pow(100**(1/5),starsInRange.query('~visible').vmag.values))
+            vis = np.sum(np.pow(100**(1/5),starsInRange.query('visible == 1').vmag.values))
+            notVis = np.sum(np.pow(100**(1/5),starsInRange.query('visible == 0').vmag.values))
             percentage = vis/(vis+notVis)
         else:
-            percentage = len(starsInRange.query('visible').index)/len(starsInRange.index)
+            percentage = len(starsInRange.query('visible == 1').index)/len(starsInRange.index)
     except ZeroDivisionError:
         #log = logging.getLogger(__name__)
         #log.warning('No stars in range to calc percentage. Returning -1.')
@@ -590,19 +591,18 @@ def calc_cloud_map(stars, rng, img_shape, weight=False):
     and convolve them with an gaussian kernel resulting in some kind of 'density map'.
     Division of both maps yields the desired cloudines map.
     '''
-    visible = stars.query('visible == True')
     nrows = ncols = rng*2 +1
     row, col = np.ogrid[:nrows, :ncols]
     disk_mask = np.zeros((nrows, ncols))
     disk_mask[((row - rng)**2 + (col - rng)**2 < int(rng)**2)] = 1
     if weight:
-        scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, weights=2.5**stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
-        scattered_stars_visible, _, _ = np.histogram2d(x=visible.y.values, y=visible.x.values, weights=2.5**visible.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars_visible,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=stars.visible.values * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, weights=np.ones(len(stars.index)) * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
         density_visible = skimage.filters.gaussian(scattered_stars_visible, rng)
         density_all = skimage.filters.gaussian(scattered_stars, rng)
     else:
-        scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
-        scattered_stars_visible, _, _ = np.histogram2d(visible.y.values, visible.x.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars_visible,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=stars.visible.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, weights=np.ones(len(stars.index)), bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
         density_visible = skimage.filters.gaussian(scattered_stars_visible, rng, mode='mirror')
         density_all = skimage.filters.gaussian(scattered_stars, rng, mode='mirror')
     with np.errstate(divide='ignore',invalid='ignore'):
@@ -654,7 +654,10 @@ def process_image(images, celestialObjects, config, args):
     observer = obs_setup(config['properties'])
     observer.date = images['timestamp']
 
-    # stop processing if sun is too high
+    # stop processing if sun is too high or config file does not match
+    if images['img'].shape[1]  != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):
+        log.error('Resolution does not match: {}!={}. Wrong config file?'.format(c_res, i_res))
+        return
     sun = ephem.Sun()
     sun.compute(observer)
     if np.rad2deg(sun.alt) > -10:
@@ -669,11 +672,12 @@ def process_image(images, celestialObjects, config, args):
     celObjects = update_star_position(celestialObjects, observer, config['image'], crop_mask)
     all_stars = pd.concat([celObjects['stars'], celObjects['planets']])
 
+
+    # calculate response of stars
     if args['--kernel']:
         kernelSize = np.arange(1, int(args['--kernel'])+1, 5)
     else:
         kernelSize = [float(config['image']['kernelsize'])]
-
     kernelResults = list()
 
     for k in kernelSize:
@@ -686,6 +690,8 @@ def process_image(images, celestialObjects, config, args):
             stars = all_stars
          
         gauss = skimage.filters.gaussian(img, sigma=k)
+
+        # chose the response function
         if args['--function'] == 'All' or args['--ratescan']:
             grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
             sobel = skimage.filters.sobel(img).clip(min=0)
@@ -696,30 +702,29 @@ def process_image(images, celestialObjects, config, args):
             images['grad'] = grad
             images['sobel'] = sobel
             images['lap'] = lap
-            response_img = lap
+            resp = lap
         elif args['--function'] == 'LoG':
-            response_img = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+            resp = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
         elif args['--function'] == 'Grad':
-            response_img = ((img - np.roll(img, 1, axis=0)).clip(min=0))**2 + ((img - np.roll(img, 1, axis=1)).clip(min=0))**2
+            resp = ((img - np.roll(img, 1, axis=0)).clip(min=0))**2 + ((img - np.roll(img, 1, axis=1)).clip(min=0))**2
         elif args['--function'] == 'Sobel':
-            response_img = skimage.filters.sobel(img).clip(min=0)
+            resp = skimage.filters.sobel(img).clip(min=0)
         else:
             log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
             sys.exit(1)
-        response_img[crop_mask] = 0
-        images['response'] = response_img
-
+        resp[crop_mask] = 0
+        images['response'] = resp
 
 
         # tolerance is max distance between actual star position and expected star position
         # this should be a little smaller than 1° because this is the minimum distance
         # between 2 catalogue stars (catalogue was filtered for this)
-        tolerance = int((float(config['image']['radius'])/90-1)/2) 
+        tolerance = int((float(config['image']['radius'])/90-1)/2)-3 
         log.debug('Calculate Filter response')
         
-        # drop old maxX maxY value (if any) and calculate them again
+        # calculate x and y position where response has its max value (search within 'tolerance' range)
         stars = pd.concat([stars.drop(['maxX','maxY'], errors='ignore', axis=1), stars.apply(
-                lambda s : findLocalMaxPos(response_img, s.x, s.y, tolerance),
+                lambda s : findLocalMaxPos(resp, s.x, s.y, tolerance),
                 axis=1)], axis=1
         )
 
@@ -727,58 +732,94 @@ def process_image(images, celestialObjects, config, args):
         stars = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
 
         #calculate response
-        stars['response'] = stars.apply(lambda s : findLocalMaxValue(response_img, s.x, s.y, tolerance), axis=1)
-        lim = re.split('\\s*,\\s*', config['image']['visibilitylimit'])
-        stars['visible'] = (stars['response'] > 10**float(lim[0]) / 10**(stars['vmag']*float(lim[1])/5))
+        stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
+        # drop stars that were not found at all
+        stars.query('response > 1e-100', inplace=True)
+        if args['--function'] == 'All' or args['--ratescan']:
+            stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
+            stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
+        lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
+        stars['visible'] = np.minimum(
+                1,
+                np.maximum(
+                    0,
+                    (np.log10(stars['response']) - (stars['vmag']*float(lim[1][0]) + float(lim[1][1]))) / 
+                    ((stars['vmag']*float(lim[0][0]) + float(lim[0][1])) - (stars['vmag']*float(lim[1][0]) + float(lim[1][1])))
+                    )
+                )
+        stars.loc[stars.vmag.values > (float(lim[1][1]) - float(lim[0][1])) / (float(lim[0][0]) - float(lim[1][0])), 'visible'] = 0
         kernelResults.append(stars)
-        #stars['visible'] = (stars['response1'] > (13/255)**2)
+
+
+
     ##################################
     try:
         df = pd.concat(kernelResults, keys=kernelSize)
     except ValueError:
         df = kernelResults[0]
 
-    if args['--debug']:
-        if args['-v']:
-            fig = plt.figure()
-            ax = fig.add_subplot(111)
-            vmin = np.nanpercentile(img, 0.5)
-            vmax = np.nanpercentile(img, 99.)
-            ax.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
-            try:
-                stars.query('visible').plot.scatter(x='x',y='y', ax=ax, color='green', grid=True)
-            except TypeError:
-                pass
-            try:
-                stars.query('not visible').plot.scatter(x='x',y='y', ax=ax, color='red', grid=True)
-            except TypeError:
-                pass
-            plt.show()
+    if args['--cam']:
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        vmin = np.nanpercentile(img, 0.5)
+        vmax = np.nanpercentile(img, 99.)
+        ax.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
+        stars.plot.scatter(x='x',y='y', ax=ax, c=stars.visible.values, cmap = plt.cm.RdYlGn, vmin=0, vmax=1, grid=True)
 
+        if args['-s']:
+            plt.savefig('cam_image_{}.pdf'.format(images['timestamp'].isoformat()))
+        if args['-v']:
+            plt.show()
+        plt.close('all')
+
+    if args['--debug']:
         if args['--response']:
             fig = plt.figure(figsize=(16,9))
             ax = plt.subplot(111)
-            #ax.axhline(13**2/255**2, color='red', label='old threshold -max')
-            #ax.axhline(11**2/255**2, color='red', label='old threshold -min')
-            stars.plot.scatter(x='vmag',y='response',ax=ax, logy=True, grid=True, label='')
-            ax.set_xlim((-1,float(config['image']['vmaglimit'])+0.5))
-            ax.set_ylim((1e-3,1e3))
-            #lower = np.log10(np.nanpercentile(stars.response.values,0.5))np.log10(np.nanpercentile(stars.response.values,0.5))
-            #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response.values,0.5))//1-1),
-            #        top=10**(np.log10(np.nanpercentile(stars.response.values,99.5))//1-1))
-            ax.legend(loc='best')
+            ax.semilogy()
+
+            # draw visibility limits
+            x = np.linspace(-5+stars.vmag.min(), stars.vmag.max()+5, 20)
+            lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
+            y1 = 10**(x*float(lim[1][0]) + float(lim[1][1]))
+            y2 = 10**(x*float(lim[0][0]) + float(lim[0][1]))
+            ax.plot(x, y1, c='red', label='lower limit')
+            ax.plot(x, y2, c='green', label='upper limit')
+
+            stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values, cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
+            ax.set_xlim((-1, max(stars['vmag'])+0.5))
+            ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response.values,10.0))//1-1),
+                top=10**(np.log10(np.nanpercentile(stars.response.values,99.9))//1+1))
+            #ax.set_ylim((1e-4,1e0))
             ax.set_ylabel('Kernel Response')
             ax.set_xlabel('Star Magnitude')
+            if args['-c'] == 'GTC':
+                if args['--function'] == 'Grad':
+                    ax.axhspan(ymin=11**2/255**2, ymax=13**2/255**2, color='red', alpha=0.5, label='old threshold range')
+                if args['--function'] == 'LoG':
+                    ax.axhline(0.015, color='red', label='Estimated threshold')
+                ax.axvline(4.5, color='green', label='Magnitude lower limit')
+
+            # show camera image in a subplot
+            ax_in= inset_axes(ax,
+                    width='30%',
+                    height='40%',
+                    loc=3)
+            vmin = np.nanpercentile(img, 0.5)
+            vmax = np.nanpercentile(img, 99.)
+            ax_in.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
+            ax_in.get_xaxis().set_visible(False)
+            ax_in.get_yaxis().set_visible(False)
+            
+            ax.legend(loc='best')
             if args['-s']:
-                plt.savefig('response_{}.pdf'.format(images['timestamp'].isoformat()))
+                plt.savefig('response_{}_{}.pdf'.format(args['--function'], images['timestamp'].isoformat()))
             if args['-v']:
                 plt.show()
             plt.close('all')
 
         if args['--ratescan']:
             log.info('Doing ratescan')
-            stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
-            stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
             gradList = list()
             sobelList = list()
             lapList = list()
@@ -841,26 +882,29 @@ def process_image(images, celestialObjects, config, args):
             del lap
 
     if args['--cloudmap']:
+        log.debug('Calculating cloud map')
         ax1 = plt.subplot(121)
         vmin = np.nanpercentile(img, 5.5)
         vmax = np.nanpercentile(img, 99.9)
         ax1.imshow(img, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
-        stars.query('visible').plot.scatter(x='x',y='y', ax=ax1, color='green', grid=True)
-        stars.query('not visible').plot.scatter(x='x',y='y', ax=ax1, color='red', grid=True)
         ax1.grid()
 
         ax2 = plt.subplot(122)
-        cloud_map1 = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=False)
-        cloud_map1[crop_mask] = 0
+        #cloud_map1 = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=False)
+        #cloud_map1[crop_mask] = 0
         cloud_map2 = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=True)
         cloud_map2[crop_mask] = 0
-        ax2.imshow(cloud_map1, cmap='gray_r',vmin=0,vmax=1)
+        ax2.imshow(cloud_map2, cmap='gray_r',vmin=0,vmax=1)
         ax2.grid()
+        if args['-s']:
+            plt.savefig('cloudMap_{}.png'.format(images['timestamp'].isoformat()))
+        plt.close('all')
+
         plt.show()
 
     timestamp = images['timestamp']
     del images
     try:
-        return stars, timestamp, thresh
+        return stars, timestamp, response, thresh
     except UnboundLocalError:
         return stars, timestamp, (np.NaN,np.NaN,np.NaN)
