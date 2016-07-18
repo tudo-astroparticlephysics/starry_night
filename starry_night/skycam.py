@@ -65,6 +65,51 @@ def get_last_modified(url, *args, **kwargs):
     return date
 
 
+def getBlobsize(img, thresh, limit=0):
+    '''
+    Returns size of the blob in the center of img.
+    If the blob is bigger than limit, limit gets returned immideatly.
+
+    A blob consists of all 8 neighboors that are bigger than 'thresh' and their neighboors respectively.
+    '''
+    if thresh <= 0:
+        raise ValueError('Thresh > 0 required')
+    if img.shape[0]%2 == 0 or img.shape[1]%2==0:
+        raise IndexError('Only odd sized arrays are supported. Array shape:{}'.format(img.shape))
+    if limit == 0:
+        limit = img.shape[0]*img.shape[1]
+
+    center = (img.shape[0]//2, img.shape[1]//2)
+
+    # if all pixels are above threshold then return max blob size
+    if thresh <= np.min(img):
+        return np.minimum(limit, img.shape[0]*img.shape[1])
+    
+    # work on local copy
+    tempImg = img.copy()
+    tempImg[~np.isfinite(tempImg)] = 0
+
+    nList = list()
+    count = 0
+
+    # fill list with pixels and count them
+    nList.append(center)
+    while len(nList) > 0:
+        x,y = nList.pop(0)
+
+        for i in (-1,0,1):
+            for j in (-1,0,1):
+                if x+i<0 or x+i>=img.shape[0] or y+j<0 or y+j>=img.shape[1]:
+                    pass
+                elif tempImg[x+i,y+j] >= thresh:
+                    count += 1
+                    tempImg[x+i,y+j] = 0
+                    nList.append((x+i,y+j))
+        if count >= limit:
+            return limit
+    return count
+    
+
 def run():
     log = logging.getLogger(__name__)
     wait = 120  #wait 120 seconds between downloads
@@ -526,6 +571,12 @@ def dispHist(image):
 
 
 def isInRange(position, stars, rng, unit='deg'):
+    '''
+    Returns true or false for each star in stars if distance between star and position<rng
+
+    If unit= "pixel" position and star must have attribute .x and .y in pixel and rng is pixel distance
+    If unit= "deg" position and star must have attribute .ra and .dec in degree 0<360 and rng is degree
+    '''
     if rng < 0:
         raise ValueError
     
@@ -535,16 +586,14 @@ def isInRange(position, stars, rng, unit='deg'):
         else:
             return ((position[0] - stars.x)**2 + (position[1] - stars.y)**2 <= rng**2)
     elif unit == 'deg':
-        ra2 = stars['ra'].values/12*np.pi
-        dec2 = stars['dec'].values
         if type(position) == dict:
-            ra1 = position['ra']/12*np.pi
+            ra1 = position['ra']
             dec1 = position['dec']
         else:
-            ra1 = position[0]/12*np.pi
-            dec1 = position[1]/180*np.pi
+            ra1 = position[0]
+            dec1 = position[1]
 
-        deltaDeg = 2*np.arcsin(np.sqrt(np.sin((dec1-dec2)/2)**2 + np.cos(dec1)*np.cos(dec2)*np.sin((ra1-ra2)/2)**2))
+        deltaDeg = 2*np.arcsin(np.sqrt(np.sin((dec1-stars.dec)/2)**2 + np.cos(dec1)*np.cos(stars.dec)*np.sin((ra1-stars.ra)/2)**2))
         return deltaDeg <= np.deg2rad(rng)
     else:
         raise ValueError('unit has unknown type')
@@ -703,6 +752,8 @@ def process_image(images, celestialObjects, config, args):
             images['sobel'] = sobel
             images['lap'] = lap
             resp = lap
+        elif args['--function'] == 'DoG':
+            resp = skimage.filters.gaussian(img, sigma=k) - skimage.filters.gaussian(img, sigma=1.6*k)
         elif args['--function'] == 'LoG':
             resp = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
         elif args['--function'] == 'Grad':
@@ -733,12 +784,19 @@ def process_image(images, celestialObjects, config, args):
 
         #calculate response
         stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
-        # drop stars that were not found at all
+
+        # drop stars that were not found at all, because response=0 interferes with log-plot
         stars.query('response > 1e-100', inplace=True)
+        
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
             stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
         lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
+
+        # calculate visibility percentage
+        # if response > visibleUpperLimit -> visible=1
+        # if response < visibleUpperLimit -> visible=0
+        # if in between: scale linear
         stars['visible'] = np.minimum(
                 1,
                 np.maximum(
@@ -747,7 +805,10 @@ def process_image(images, celestialObjects, config, args):
                     ((stars['vmag']*float(lim[0][0]) + float(lim[0][1])) - (stars['vmag']*float(lim[1][0]) + float(lim[1][1])))
                     )
                 )
+        # set visible = 0 for all magnitudes where upperLimit < lowerLimit
         stars.loc[stars.vmag.values > (float(lim[1][1]) - float(lim[0][1])) / (float(lim[0][0]) - float(lim[1][0])), 'visible'] = 0
+
+        # append results
         kernelResults.append(stars)
 
 
@@ -760,11 +821,17 @@ def process_image(images, celestialObjects, config, args):
 
     if args['--cam']:
         fig = plt.figure()
-        ax = fig.add_subplot(111)
+        #k = 1
+        #resp = skimage.filters.gaussian(img, sigma=k) - skimage.filters.gaussian(img, sigma=6*k)
+        img = resp
         vmin = np.nanpercentile(img, 0.5)
         vmax = np.nanpercentile(img, 99.)
-        ax.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
-        stars.plot.scatter(x='x',y='y', ax=ax, c=stars.visible.values, cmap = plt.cm.RdYlGn, vmin=0, vmax=1, grid=True)
+        plt.imshow(img,vmin=vmin,vmax=vmax)
+        stars.plot.scatter(x='x',y='y', ax=plt.gca(), c=stars.visible.values, cmap = plt.cm.RdYlGn, vmin=0, vmax=1, grid=True)
+        plt.colorbar()
+        plt.show()
+
+        embed()
 
         if args['-s']:
             plt.savefig('cam_image_{}.pdf'.format(images['timestamp'].isoformat()))
@@ -772,7 +839,7 @@ def process_image(images, celestialObjects, config, args):
             plt.show()
         plt.close('all')
 
-    if args['--debug']:
+    if args['--single']:
         if args['--response']:
             fig = plt.figure(figsize=(16,9))
             ax = plt.subplot(111)
@@ -786,11 +853,11 @@ def process_image(images, celestialObjects, config, args):
             ax.plot(x, y1, c='red', label='lower limit')
             ax.plot(x, y2, c='green', label='upper limit')
 
-            stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values, cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
+            stars.query('vmag<4').plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.query('vmag<4').visible.values, cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
             ax.set_xlim((-1, max(stars['vmag'])+0.5))
-            ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response.values,10.0))//1-1),
-                top=10**(np.log10(np.nanpercentile(stars.response.values,99.9))//1+1))
-            #ax.set_ylim((1e-4,1e0))
+            #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response.values,10.0))//1-1),
+            #    top=10**(np.log10(np.nanpercentile(stars.response.values,99.9))//1+1))
+            ax.set_ylim((1e-1,1e3))
             ax.set_ylabel('Kernel Response')
             ax.set_xlabel('Star Magnitude')
             if args['-c'] == 'GTC':

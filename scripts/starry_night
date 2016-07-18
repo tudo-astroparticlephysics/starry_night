@@ -21,6 +21,7 @@ Options:
     --ratescan      Create ratescan-like plot of visibility threshold
     --response      Plot response vs Magnitude in log scale 
     --cloudmap      Create cloud map of the sky
+    --single        Display information for each single image
     --version       Show version.
     --debug         debug it [default: False]
 '''
