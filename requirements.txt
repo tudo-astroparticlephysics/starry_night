@@ -1,8 +1,0 @@
-requests
-numpy
-scipy
-matplotlib
-python-dateutil
-pandas
-sqlalchemy
-PyMySQL
