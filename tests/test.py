@@ -33,11 +33,46 @@ def test_isInRange():
     star1 = pd.Series({'x':2, 'y':3})
     star2 = pd.Series({'x':6, 'y':6})
 
-    b = skycam.isInRange(star1, star2, rng=5)
+    b = skycam.isInRange(star1, star2, rng=5, unit='pixel')
     eq_(b, True, 'On Range failed')
 
-    b = skycam.isInRange(star1, star2, rng=4.999)
+    b = skycam.isInRange(star1, star2, rng=4.999, unit='pixel')
     eq_(b, False, 'Outside Range failed')
 
-    b = skycam.isInRange(star1, star2, rng=5.001)
+    b = skycam.isInRange(star1, star2, rng=5.001, unit='pixel')
     eq_(b, True, 'In Range failed')
+
+    star1 = pd.Series({'ra':0, 'dec':0})
+    star2 = pd.Series({'ra':0, 'dec':5/180*np.pi})
+
+    b = skycam.isInRange(star1, star2, rng=5, unit='deg')
+    eq_(b, True, 'On Range failed')
+
+    b = skycam.isInRange(star1, star2, rng=4.999, unit='deg')
+    eq_(b, False, 'Outside Range failed')
+
+    b = skycam.isInRange(star1, star2, rng=5.001, unit='deg')
+    eq_(b, True, 'In Range failed')
+
+def test_getBlobsize():
+    image = np.ones((51,51))
+    b = skycam.getBlobsize(image, 0.5, limit=10)
+    eq_(b, 10, 'Exeed limit failed: {}'.format(b))
+
+    b = skycam.getBlobsize(image, 0.5)
+    eq_(b, 51*51, 'Total blob failed')
+
+    image[25,25] = 20
+    image[26,24] = 20
+    image[27,24] = 20
+    b = skycam.getBlobsize(image, 2)
+    eq_(b, 3, 'Diagonal blob failed: {}'.format(b))
+
+    image[:,22:26] = 20
+    b = skycam.getBlobsize(image, 2)
+    eq_(b, 204, 'Blob at border failed: {}'.format(b))
+
+    image[25,24]=np.NaN
+    image[26,25]=-np.NaN
+    b = skycam.getBlobsize(image, 2)
+    eq_(b, 202, 'Blob at border failed: {}'.format(b))
