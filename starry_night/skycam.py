@@ -808,6 +808,8 @@ def process_image(images, celestialObjects, config, args):
         # set visible = 0 for all magnitudes where upperLimit < lowerLimit
         stars.loc[stars.vmag.values > (float(lim[1][1]) - float(lim[0][1])) / (float(lim[0][0]) - float(lim[1][0])), 'visible'] = 0
 
+        stars['blobSize'] = stars.apply(lambda s : getBlobsize(resp[s.maxY-25:s.maxY+26, s.maxX-25:s.maxX+26], s.response*0.1), axis=1)
+
         # append results
         kernelResults.append(stars)
 
@@ -823,10 +825,10 @@ def process_image(images, celestialObjects, config, args):
         fig = plt.figure()
         #k = 1
         #resp = skimage.filters.gaussian(img, sigma=k) - skimage.filters.gaussian(img, sigma=6*k)
-        img = resp
+        #img = resp
         vmin = np.nanpercentile(img, 0.5)
         vmax = np.nanpercentile(img, 99.)
-        plt.imshow(img,vmin=vmin,vmax=vmax)
+        plt.imshow(img,vmin=vmin,vmax=vmax, cmap='gray')
         stars.plot.scatter(x='x',y='y', ax=plt.gca(), c=stars.visible.values, cmap = plt.cm.RdYlGn, vmin=0, vmax=1, grid=True)
         plt.colorbar()
         plt.show()
@@ -853,7 +855,7 @@ def process_image(images, celestialObjects, config, args):
             ax.plot(x, y1, c='red', label='lower limit')
             ax.plot(x, y2, c='green', label='upper limit')
 
-            stars.query('vmag<4').plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.query('vmag<4').visible.values, cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
+            stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values, cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
             ax.set_xlim((-1, max(stars['vmag'])+0.5))
             #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response.values,10.0))//1-1),
             #    top=10**(np.log10(np.nanpercentile(stars.response.values,99.9))//1+1))
