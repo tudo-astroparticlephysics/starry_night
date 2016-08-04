@@ -699,7 +699,7 @@ def process_image(images, celestialObjects, config, args):
     log = logging.getLogger(__name__)
 
 
-    log.info('Processing image take at: {}'.format(images['timestamp']))
+    log.info('Processing image taken at: {}'.format(images['timestamp']))
     observer = obs_setup(config['properties'])
     observer.date = images['timestamp']
 
@@ -709,17 +709,22 @@ def process_image(images, celestialObjects, config, args):
         return
     sun = ephem.Sun()
     sun.compute(observer)
+    moon = ephem.Moon()
+    moon.compute(observer)
     if np.rad2deg(sun.alt) > -10:
-        log.info('Sun too high: {}° above horizon. We start at -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
+        log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
+        return
+    elif np.rad2deg(moon.alt) > -10:
+        log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
         return
 
     # create cropping array to mask unneccessary image regions.
     img = images['img']
     crop_mask = get_crop_mask(img, config['crop'])
 
-    # update celestial objects
+    # update celestial objects (ignore planets, because they are bigger than stars and mess up the detection)
     celObjects = update_star_position(celestialObjects, observer, config['image'], crop_mask)
-    all_stars = pd.concat([celObjects['stars'], celObjects['planets']])
+    all_stars = pd.concat([celObjects['stars'],])# celObjects['planets']])
 
 
     # calculate response of stars
@@ -808,7 +813,7 @@ def process_image(images, celestialObjects, config, args):
         # set visible = 0 for all magnitudes where upperLimit < lowerLimit
         stars.loc[stars.vmag.values > (float(lim[1][1]) - float(lim[0][1])) / (float(lim[0][0]) - float(lim[1][0])), 'visible'] = 0
 
-        stars['blobSize'] = stars.apply(lambda s : getBlobsize(resp[s.maxY-25:s.maxY+26, s.maxX-25:s.maxX+26], s.response*0.1), axis=1)
+        #stars['blobSize'] = stars.apply(lambda s : getBlobsize(resp[s.maxY-25:s.maxY+26, s.maxX-25:s.maxX+26], s.response*0.1), axis=1)
 
         # append results
         kernelResults.append(stars)
@@ -833,7 +838,7 @@ def process_image(images, celestialObjects, config, args):
         plt.colorbar()
         plt.show()
 
-        embed()
+        #embed()
 
         if args['-s']:
             plt.savefig('cam_image_{}.pdf'.format(images['timestamp'].isoformat()))
@@ -967,9 +972,10 @@ def process_image(images, celestialObjects, config, args):
         ax2.grid()
         if args['-s']:
             plt.savefig('cloudMap_{}.png'.format(images['timestamp'].isoformat()))
+        if args['-v']:
+            plt.show()
         plt.close('all')
 
-        plt.show()
 
     timestamp = images['timestamp']
     del images

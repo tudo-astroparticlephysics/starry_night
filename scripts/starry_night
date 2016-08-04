@@ -44,6 +44,7 @@ from multiprocessing import Pool
 from functools import partial
 from scipy.optimize import curve_fit
 from re import split
+from collections import Counter
 
 from starry_night import skycam
 from IPython import embed
@@ -94,6 +95,7 @@ def main(args):
 
     config = configparser.RawConfigParser()
     log.debug('Parsing config file: {}'.format(args['-c']))
+    # c!=0 if config was read successfully
     if '.' in args['-c'] or '/' in args['-c']:
         c = len(config.read(args['-c']))
     else:
@@ -171,6 +173,9 @@ def main(args):
             results.pop(i)
         else:
             i+=1
+    
+    imgCount = len(results)
+    log.info('{} images were processed successfully.'.format(imgCount))
 
     # no more processing if one or less images were processed successfully
     #if len(results) <= 1:
@@ -182,11 +187,64 @@ def main(args):
     del results
     del star_results
     del star_timestamps
+
+    df.sortlevel(inplace=True)
     #d.loc[(slice(None), 746), :]
     #d.loc[(slice(None), 746),:]['response3'].plot.hist(10)
 
     mean = df.mean(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
     std = df.std(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
+
+    df.reset_index(inplace=True)
+    c = Counter(df.HIP)
+    new_df = pd.concat( [df.query('HIP==%d'%key) for key, val in c.items() if val > 40 ] )
+    embed()
+
+    if args['--altitude']:
+        def lin(x,m,b):
+            return m*x+b
+
+        popt = [-0.40012162,  2.6433107 ] # idealer fit, mit 10° zenith
+        #x = mean.altitude.values
+        #y = np.log10(mean.response.values)
+        #popt, pcov = curve_fit(lin, x, y)
+        new_df['erwartet'] = 10**lin(new_df.vmag.values, popt[0], popt[1])
+        new_df['diff'] = new_df['response'] / new_df['erwartet']
+        new_df['diff2'] = (new_df['response'] / new_df['erwartet'])**(1/new_df['erwartet'])
+
+
+        from matplotlib.pyplot import cm
+        color=cm.seismic(np.linspace(0,1,65))
+
+        def quad(x,a):
+            return -a*(x[0]-np.pi/2)**2 + x[1]
+        def quad2(x,r):
+            return -np.sqrt(r*121/30)*(x-np.pi/2)**2 + r
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        r = []
+        #grouped = new_df.groupby('HIP')
+        for i, group in enumerate(grouped):
+            if i<90000 and group[1].vmag.max() < 4.8:# and group[1].altitude.max() - group[1].altitude.min() > 1:
+                c = color[int(group[1].vmag.max()*10)]
+                group[1].head()
+                x = group[1].sort_values('altitude').altitude.values
+                y= (group[1].sort_values('altitude').diff2.values)
+                group[1].plot.scatter(ax=ax, x='altitude', y='diff2', c=c)
+                inp = (x, group[1].erwartet.values)
+                #popt, pcov = curve_fit(quad2, inp, y, p0=[0])
+                #popt, pcov = curve_fit(lin, x, y)
+                #ax.plot(x, quad2(x,group[1].diff2.max()))
+                print(group[1].diff2.max(), group[1].vmag.max())
+                #if pcov[0,0] < 0.5:
+                #    r.append((popt, group[1].erwartet.max()))
+        plt.show()
+
+
+
+
+        plt.hist(np.array(r)[:,0],bins=200, range=(-4,15))
 
     def logf(x, m, b):
         return 10**(m*x+b)
