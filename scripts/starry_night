@@ -220,18 +220,20 @@ def main(args):
             return -a*(x[0]-np.pi/2)**2 + x[1]
         def quad2(x,r):
             return -np.sqrt(r*121/30)*(x-np.pi/2)**2 + r
+        def airmass(x, ):
+
 
         fig = plt.figure()
         ax = fig.add_subplot(111)
         r = []
         #grouped = new_df.groupby('HIP')
         for i, group in enumerate(grouped):
-            if i<90000 and group[1].vmag.max() < 4.8:# and group[1].altitude.max() - group[1].altitude.min() > 1:
+            if i<90000 and 4 < group[1].vmag.max() < 5.:# and group[1].altitude.max() - group[1].altitude.min() > 1:
                 c = color[int(group[1].vmag.max()*10)]
                 group[1].head()
                 x = group[1].sort_values('altitude').altitude.values
                 y= (group[1].sort_values('altitude').diff2.values)
-                group[1].plot.scatter(ax=ax, x='altitude', y='diff2', c=c)
+                group[1].plot.scatter(ax=ax, x='altitude', y='diff3', c=c)
                 inp = (x, group[1].erwartet.values)
                 #popt, pcov = curve_fit(quad2, inp, y, p0=[0])
                 #popt, pcov = curve_fit(lin, x, y)
