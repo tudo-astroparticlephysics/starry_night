@@ -212,6 +212,9 @@ def main(args):
         new_df['diff'] = new_df['response'] / new_df['erwartet']
         new_df['diff2'] = (new_df['response'] / new_df['erwartet'])**(1/new_df['erwartet'])
 
+        a = df.query('altitude>1.4').groupby('HIP').filter(lambda x : len(x) > 10).groupby('HIP').response.mean()
+        a = df.join(a, on='HIP', rsuffix='r').dropna()
+        plt.show()
 
         from matplotlib.pyplot import cm
         color=cm.seismic(np.linspace(0,1,65))
@@ -220,27 +223,53 @@ def main(args):
             return -a*(x[0]-np.pi/2)**2 + x[1]
         def quad2(x,r):
             return -np.sqrt(r*121/30)*(x-np.pi/2)**2 + r
-        def airmass(x, ):
+        def airmass(x):
+            return 1 / np.cos(np.pi/2 - x)
+        def transmission(x, c):
+            x = np.pi/2 -x
+            return np.exp(-c * (1 - 1/np.cos(x)))
+        def transmission2(x, c):
+            x = np.pi/2 -x
+            return np.exp(-c * (1 - 1/np.cos(x)*(1-0.0012*(1/np.cos(x)**2 - 1))))
+
+
+        curve_fit(transmission, b.get_group(37826).altitude.values, b.get_group(37826).response.values / b.get_group(37826).responser.max())
+        curve_fit(transmission2, b.get_group(37826).altitude.values, b.get_group(37826).response.values / b.get_group(37826).responser.max())
+
+        b = a.groupby('HIP')
+        ax = plt.figure().add_subplot(111)
+        gr = 36850
+        gr = 37826
+        b.get_group(gr).plot.scatter(ax=ax, x='altitude', y='response')
+        ax.scatter(x=b.get_group(gr).altitude.values, y=b.get_group(gr).responser.max() * transmission2(b.get_group(gr).altitude, -0.57629442), color='green')
+        ax.scatter(x=b.get_group(gr).altitude.values, y=b.get_group(gr).responser.max() * transmission(b.get_group(gr).altitude, -0.57629442), color='red')
 
 
         fig = plt.figure()
         ax = fig.add_subplot(111)
         r = []
+        grouped = df.groupby('HIP')
         #grouped = new_df.groupby('HIP')
         for i, group in enumerate(grouped):
-            if i<90000 and 4 < group[1].vmag.max() < 5.:# and group[1].altitude.max() - group[1].altitude.min() > 1:
+            if i<90000 and 0 < group[1].vmag.max() < 6.0 and group[1].altitude.max() > 1.4 and group[1].altitude.max()-group[1].altitude.min() > 0.8:
+                maxVal = group[1].query('altitude > {}'.format(group[1].altitude.max()*0.9)).response.mean()
                 c = color[int(group[1].vmag.max()*10)]
                 group[1].head()
                 x = group[1].sort_values('altitude').altitude.values
-                y= (group[1].sort_values('altitude').diff2.values)
-                group[1].plot.scatter(ax=ax, x='altitude', y='diff3', c=c)
-                inp = (x, group[1].erwartet.values)
+                y= (group[1].sort_values('altitude').response.values)
+                group[1].plot.scatter(ax=ax, x='altitude', y='response', c=c)
+                #inp = (x, group[1].erwartet.values)
                 #popt, pcov = curve_fit(quad2, inp, y, p0=[0])
-                #popt, pcov = curve_fit(lin, x, y)
-                #ax.plot(x, quad2(x,group[1].diff2.max()))
-                print(group[1].diff2.max(), group[1].vmag.max())
+                popt, pcov = curve_fit(transmission2, x, y)
+                ax.plot(x, maxVal*transmission2(x, -0.57629442))
+                print(group[1].response.max(), group[1].vmag.max())
                 #if pcov[0,0] < 0.5:
-                #    r.append((popt, group[1].erwartet.max()))
+                r.append((popt[0], pcov[0], maxVal, group[1].vmag.values.max()))
+        plt.show()
+        r = np.array(r)
+        plt.errorbar(r[:,3], r[:,0], yerr=r[:,1], linestyle='', color='blue', marker='o', ms=2)
+        plt.grid()
+        plt.ylim((-2,4))
         plt.show()
 
 
