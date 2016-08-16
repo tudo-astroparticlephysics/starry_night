@@ -27,6 +27,16 @@ from scipy.ndimage.measurements import label
 from IPython import embed
 
 
+def lin(x,m,b):
+    return m*x+b
+
+def transmission(x, c):
+    x = np.pi/2 -x
+    return np.exp(-c * (1 - 1/np.cos(x)))
+def transmission2(x, c):
+    x = np.pi/2 -x
+    return np.exp(-c * (1 - 1/np.cos(x)*(1-0.0012*(1/np.cos(x)**2 - 1))))
+
 def downloadImg(url, *args, **kwargs):
     if url.split('.')[-1]== 'mat':
         ret = requests.get(url)
@@ -787,11 +797,13 @@ def process_image(images, celestialObjects, config, args):
         # drop stars that got mistaken for a brighter neighboor
         stars = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
 
-        #calculate response
+        # calculate response and drop stars that were not found at all, because response=0 interferes with log-plot
         stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
-
-        # drop stars that were not found at all, because response=0 interferes with log-plot
         stars.query('response > 1e-100', inplace=True)
+
+        # correct atmospherice absorbtion
+        lim = split('\\s*,\\s*', config['calibration']['airmass_absorbtion'])
+        stars['response_corr'] = stars.response / transmission2(stars.altitude, float(lim[0]))
         
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)

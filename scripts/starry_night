@@ -22,6 +22,7 @@ Options:
     --response      Plot response vs Magnitude in log scale 
     --cloudmap      Create cloud map of the sky
     --single        Display information for each single image
+    --airmass      Calculate airmass absorbtion
     --version       Show version.
     --debug         debug it [default: False]
 '''
@@ -33,13 +34,13 @@ import logging
 import os
 import sys
 import time
-import matplotlib.pyplot as plt
-from matplotlib import rc
-from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import configparser
+import matplotlib.pyplot as plt
 import skimage.filters
+from matplotlib import rc, cm
+from datetime import datetime, timedelta
 from multiprocessing import Pool
 from functools import partial
 from scipy.optimize import curve_fit
@@ -200,82 +201,78 @@ def main(args):
     new_df = pd.concat( [df.query('HIP==%d'%key) for key, val in c.items() if val > 40 ] )
     embed()
 
-    if args['--altitude']:
-        def lin(x,m,b):
-            return m*x+b
+    if args['--airmass']:
+        if not args['--debug']:
+            log.error('This option is only available in debug mode')
+        else:
+            '''
+            new_df['erwartet'] = 10**skycam.lin(new_df.vmag.values, popt[0], popt[1])
+            new_df['diff'] = new_df['response'] / new_df['erwartet']
+            new_df['diff2'] = (new_df['response'] / new_df['erwartet'])**(1/new_df['erwartet'])
 
-        popt = [-0.40012162,  2.6433107 ] # idealer fit, mit 10° zenith
-        #x = mean.altitude.values
-        #y = np.log10(mean.response.values)
-        #popt, pcov = curve_fit(lin, x, y)
-        new_df['erwartet'] = 10**lin(new_df.vmag.values, popt[0], popt[1])
-        new_df['diff'] = new_df['response'] / new_df['erwartet']
-        new_df['diff2'] = (new_df['response'] / new_df['erwartet'])**(1/new_df['erwartet'])
-
-        a = df.query('altitude>1.4').groupby('HIP').filter(lambda x : len(x) > 10).groupby('HIP').response.mean()
-        a = df.join(a, on='HIP', rsuffix='r').dropna()
-        plt.show()
-
-        from matplotlib.pyplot import cm
-        color=cm.seismic(np.linspace(0,1,65))
-
-        def quad(x,a):
-            return -a*(x[0]-np.pi/2)**2 + x[1]
-        def quad2(x,r):
-            return -np.sqrt(r*121/30)*(x-np.pi/2)**2 + r
-        def airmass(x):
-            return 1 / np.cos(np.pi/2 - x)
-        def transmission(x, c):
-            x = np.pi/2 -x
-            return np.exp(-c * (1 - 1/np.cos(x)))
-        def transmission2(x, c):
-            x = np.pi/2 -x
-            return np.exp(-c * (1 - 1/np.cos(x)*(1-0.0012*(1/np.cos(x)**2 - 1))))
+            a = df.query('altitude > {}'.format(80*np.pi/180)).groupby('HIP').filter(lambda x : len(x) > 10).groupby('HIP').response.mean()
+            a = df.join(a, on='HIP', rsuffix='r').dropna()
+            '''
 
 
-        curve_fit(transmission, b.get_group(37826).altitude.values, b.get_group(37826).response.values / b.get_group(37826).responser.max())
-        curve_fit(transmission2, b.get_group(37826).altitude.values, b.get_group(37826).response.values / b.get_group(37826).responser.max())
 
-        b = a.groupby('HIP')
-        ax = plt.figure().add_subplot(111)
-        gr = 36850
-        gr = 37826
-        b.get_group(gr).plot.scatter(ax=ax, x='altitude', y='response')
-        ax.scatter(x=b.get_group(gr).altitude.values, y=b.get_group(gr).responser.max() * transmission2(b.get_group(gr).altitude, -0.57629442), color='green')
-        ax.scatter(x=b.get_group(gr).altitude.values, y=b.get_group(gr).responser.max() * transmission(b.get_group(gr).altitude, -0.57629442), color='red')
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            vmag_to_plot = np.arange(0, 6.1, 0.5)
+            color = cm.jet(np.linspace(0,1,len(vmag_to_plot)))
 
+            grouped = df.groupby('HIP')
+            #remove stars that do not have enough variance in their altitude
+            filtered_df = grouped.filter(lambda x: x.altitude.max() > 70*np.pi/180 and x.altitude.min() < 35*np.pi/180)
+            for i, vmag in enumerate(vmag_to_plot):
+                c = color[i]
+                # get star with magnitude closest to 'vmag'
+                # ignore 2 stars with HIP because they are not good examples for the plot
+                to_plot = filtered_df.query(
+                        'HIP == {}'.format(
+                        filtered_df.ix[(filtered_df.query('HIP != 75312 and HIP != 52686').vmag-vmag).abs().sort(inplace=False).index[0]].HIP
+                    )
+                ).sort_values('altitude')
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        r = []
-        grouped = df.groupby('HIP')
-        #grouped = new_df.groupby('HIP')
-        for i, group in enumerate(grouped):
-            if i<90000 and 0 < group[1].vmag.max() < 6.0 and group[1].altitude.max() > 1.4 and group[1].altitude.max()-group[1].altitude.min() > 0.8:
-                maxVal = group[1].query('altitude > {}'.format(group[1].altitude.max()*0.9)).response.mean()
-                c = color[int(group[1].vmag.max()*10)]
-                group[1].head()
+                if abs(to_plot.vmag.max() - vmag)>=0.5:
+                    # dont plot, if magnitude differs too much
+                    continue
+               
+                maxVal = to_plot.query('altitude > {}'.format(np.percentile(to_plot.altitude, 90))).response.mean()
+                popt, pcov = curve_fit(skycam.transmission2, to_plot.altitude.values, to_plot.response.values/maxVal)
+
+                ax.scatter(x=to_plot['altitude']/np.pi*180, y=to_plot['response'], c=c, label='vmag = {}'.format(to_plot.vmag.max()))
+                ax.plot(to_plot.altitude/np.pi*180, maxVal*skycam.transmission2(to_plot.altitude.values, popt[0]), c=c)
+                print(vmag, to_plot.HIP.max(), popt)
+
+            ax.semilogy()
+            ax.grid()
+            ax.legend(loc='upper right')
+            plt.show()
+
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            r = []
+            for group in filtered_df.groupby('HIP'):
+                maxVal = group[1].query('altitude > {}'.format(np.percentile(group[1].altitude, 90))).response.mean()
                 x = group[1].sort_values('altitude').altitude.values
-                y= (group[1].sort_values('altitude').response.values)
-                group[1].plot.scatter(ax=ax, x='altitude', y='response', c=c)
-                #inp = (x, group[1].erwartet.values)
-                #popt, pcov = curve_fit(quad2, inp, y, p0=[0])
-                popt, pcov = curve_fit(transmission2, x, y)
-                ax.plot(x, maxVal*transmission2(x, -0.57629442))
-                print(group[1].response.max(), group[1].vmag.max())
-                #if pcov[0,0] < 0.5:
-                r.append((popt[0], pcov[0], maxVal, group[1].vmag.values.max()))
-        plt.show()
-        r = np.array(r)
-        plt.errorbar(r[:,3], r[:,0], yerr=r[:,1], linestyle='', color='blue', marker='o', ms=2)
-        plt.grid()
-        plt.ylim((-2,4))
-        plt.show()
+                y = group[1].sort_values('altitude').response.values/maxVal
+                popt, pcov = curve_fit(skycam.transmission2, x, y)
+                r.append((popt[0], np.sqrt(pcov[0]), maxVal, group[1].vmag.values.max()))
+
+            r = np.array(r)
+            popt, pcov = curve_fit(skycam.lin, r[:,3], r[:,0], sigma=r[:,1])
+            plt.errorbar(r[:,3], r[:,0], yerr=r[:,1], linestyle='', color='blue', marker='o', ms=2)
+            x = np.linspace(-1,8,5)
+            y = skycam.lin(x, popt[0], popt[1])
+            plt.plot(x,y, color='red', label='linear regression')
+            plt.grid()
+            plt.legend()
+            plt.show()
+            print(popt, pcov)
 
 
 
-
-        plt.hist(np.array(r)[:,0],bins=200, range=(-4,15))
 
     def logf(x, m, b):
         return 10**(m*x+b)
