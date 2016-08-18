@@ -30,20 +30,60 @@ from IPython import embed
 def lin(x,m,b):
     return m*x+b
 
-def transmission(x, c):
+def transmission(x, a, c):
+    '''
+    return atmospheric transmission of planar model
+    '''
     x = np.pi/2 -x
-    return np.exp(-c * (1 - 1/np.cos(x)))
-def transmission2(x, c):
+    return a*np.exp(-c * (1/np.cos(x) - 1))
+def transmission2(x, a, c):
+    '''
+    return atmospheric transmission of planar model with correction (Young - 1974)
+    '''
     x = np.pi/2 -x
-    return np.exp(-c * (1 - 1/np.cos(x)*(1-0.0012*(1/np.cos(x)**2 - 1))))
+    return a * np.exp(-c * (1/np.cos(x)*(1-0.0012*(1/np.cos(x)**2 - 1)) - 1))
+
+
+def transmission3(x, a, c):
+    '''
+    return atmospheric transmission of spheric model with elevated observer
+    This model does not return 1.0 for zenith angle so we subtract airM_0 instead
+    '''
+    yObs=2.2
+    yAtm=9.9
+    rEarth=6371.0
+
+    x = (np.pi/2 -x)
+    r = rEarth / yAtm
+    y = yObs / yAtm
+
+    airMass = np.sqrt( ( r + y )**2 * np.cos(x)**2 + 2.*r*(1.-y) - y**2 + 1.0 ) - (r+y)*np.cos(x)
+    airM_0 = np.sqrt( ( r + y )**2 + 2.*r*(1.-y) - y**2 + 1.0 ) - (r+y)
+    return a* np.exp(-c * (airMass - airM_0))
+
+'''
+y1 = sk.transmission(x, 1, 0.57)
+y2 = sk.transmission2(x, 1, 0.57)
+y3 = sk.transmission3(x, 1, 0.57, yObs=0.0, yAtm=9)
+y4 = sk.transmission3(x, 1, 0.57, yObs=2.2, yAtm=9)
+
+plt.plot(x,y1, label='Planar')
+plt.plot(x,y2, label='Planar korrektur')
+plt.plot(x,y3, label='geom NN')
+plt.plot(x,y4, label='geom 2200m')
+plt.grid()
+plt.legend()
+plt.show()
+'''
+
 
 def downloadImg(url, *args, **kwargs):
-    if url.split('.')[-1]== 'mat':
-        ret = requests.get(url)
+    imgList = list()
+    timeList = list()
+    outList = list()
+    ret = requests.get(url)
+    if url.split('.')[-1] == 'mat':
         data = matlab.loadmat(BytesIO(ret.content))
-        imgList = list()
-        timeList = list()
-        outList = list()
         for d in list(data.values()):
             try:
                 if d.shape[0] > 100 and d.shape[1] > 100:
@@ -54,13 +94,23 @@ def downloadImg(url, *args, **kwargs):
                 timeList.append(datetime.strptime(d[0], '%Y/%m/%d %H:%M:%S'))
             except (IndexError, TypeError, ValueError):
                 pass
+    elif url.split('.')[-1] == 'FIT':
+        hdulist = fits.open(BytesIO(ret.content), ignore_missing_end=True)
+        # transpose because fits file is flipped for some reason
+        imgList.append(hdulist[0].data.T)
+        timeList.append(
+                datetime.strptime(
+                    hdulist[0].header['UTC'],
+                    '%Y/%m/%d %H:%M:%S'
+                )
+        )
         
-        for img, t in zip(imgList,timeList):
-            outList.append(dict({
-                'img' : img,
-                'timestamp' : t,
-                })
-            )
+    for img, t in zip(imgList,timeList):
+        outList.append(dict({
+            'img' : img,
+            'timestamp' : t,
+            })
+        )
 
         return outList
     return [rgb2gray(imread(url, ))]
@@ -405,6 +455,8 @@ def update_star_position(celestialObjects, observer, cam, crop):
     planets['x'], planets['y'] = horizontal2image(planets.azimuth, planets.altitude, cam=cam)
     moonData['x'], moonData['y'] = horizontal2image(moonData['azimuth'], moonData['altitude'], cam=cam)
     sunData['x'], sunData['y'] = horizontal2image(sunData['azimuth'], sunData['altitude'], cam=cam)
+
+    # remove stars and planets that are withing cropping area
     stars = stars[stars.apply(lambda x, crop=crop: ~crop[int(x['y']), int(x['x'])], axis=1)]
     planets = planets[planets.apply(lambda x, crop=crop: ~crop[int(x['y']), int(x['x'])], axis=1)]
 
@@ -803,7 +855,8 @@ def process_image(images, celestialObjects, config, args):
 
         # correct atmospherice absorbtion
         lim = split('\\s*,\\s*', config['calibration']['airmass_absorbtion'])
-        stars['response_corr'] = stars.response / transmission2(stars.altitude, float(lim[0]))
+        stars['response_orig'] = stars.response
+        stars['response'] = stars.response / transmission2(stars.altitude, 1.0, float(lim[0]))
         
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
@@ -850,7 +903,6 @@ def process_image(images, celestialObjects, config, args):
         plt.colorbar()
         plt.show()
 
-        #embed()
 
         if args['-s']:
             plt.savefig('cam_image_{}.pdf'.format(images['timestamp'].isoformat()))
