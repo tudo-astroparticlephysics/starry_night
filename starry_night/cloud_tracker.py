@@ -1,5 +1,7 @@
 import numpy as np
-import matplotlib as plt
+import matplotlib.pyplot as plt
+from itertools import product
+import logging
 from skimage.segmentation import active_contour
 from IPython import embed
 from starry_night.skycam import r2theta, theta2r
@@ -29,6 +31,7 @@ class CloudTracker:
     maxMaps = 5
     atmosphere_height = 9
     def __init__(self, conf):
+        self.log = logging.getLogger(__name__)
         self.maps = []
         self.transMaps= []
         self.maxID = 0
@@ -72,15 +75,40 @@ class CloudTracker:
         except:
             raise
 
+    def __calculate_movement(self, map1, map2):
+        self.log.debug('Calculate cloud movement')
+        minVal = np.inf
+        rotation = (0,0)
+        for i,j in product(np.arange(0, map1.shape[0], map1.shape[0]//20), np.arange(0, map1.shape[1], map1.shape[1]//20)):
+            temp = np.sum((map1 - np.roll(np.roll(map2, i, axis=0), j, axis=1))**2)
+            if temp < minVal:
+                minVal = temp
+                rotation = (i,j)
+            if temp <= 0:
+                break
+        return rotation, minVal
+
+
+
     def print_clouds(self):
         print('Currently {} images loaded'.format(len(self.maps)))
+        for i,j in zip(self.maps, self.transMaps):
+            fig = plt.figure()
+            ax1 = fig.add_subplot(121)
+            ax1.imshow(i, vmin=0, vmax=1)
+            ax2 = fig.add_subplot(122)
+            ax2.imshow(j, vmin=0, vmax=1)
+            plt.show()
 
     # update detects clouds in cloudmap and updates old cloud positions
     def update(self, cloudMap):
-        transformed = 3
-        self.__transformMap(cloudMap)
+        self.log.debug('Update')
+        # store projection of clouds on atmosphere
         self.__add_cloud(cloudMap)
-        # detect clouds
+
+        if len(self.maps) > 1:
+            print(self.__calculate_movement(self.transMaps[-2], self.transMaps[-1]))
+
 
 
 

@@ -13,7 +13,7 @@ Options:
     -c Camera       Provide a camera config file or use one of these names: 'GTC', 'Magic' or 'CTA'
     -v              Visual output
     -s              Save output to files
-    --kernel=<k>    Try different kernel sizes
+    --kernel=<k>    Try different kernel sizes from 1 to <k> in steps of 5
     --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG', 'All')
                     Using option '--ratescan' implies 'LoG'. [default: LoG]
 
@@ -21,8 +21,9 @@ Options:
     --ratescan      Create ratescan-like plot of visibility threshold
     --response      Plot response vs Magnitude in log scale 
     --cloudmap      Create cloud map of the sky
+    --cloudtrack    Track and predict clouds as they move
     --single        Display information for each single image
-    --airmass      Calculate airmass absorbtion
+    --airmass       Calculate airmass absorbtion
     --version       Show version.
     --debug         debug it [default: False]
 '''
@@ -47,7 +48,7 @@ from scipy.optimize import curve_fit
 from re import split
 from collections import Counter
 
-from starry_night import skycam
+from starry_night import skycam, cloud_tracker
 from IPython import embed
 
 def wrapper(config, celestialObjects, args, img):
@@ -178,16 +179,19 @@ def main(args):
     imgCount = len(results)
     log.info('{} images were processed successfully.'.format(imgCount))
 
-    # no more processing if one or less images were processed successfully
-    #if len(results) <= 1:
-    #    sys.exit(0)
-    star_results = list(map(lambda x: x[0], results))
-    star_timestamps = list(map(lambda x: x[1], results))
+    # no more processing if no images were processed successfully
+    if len(results) == 0:
+        sys.exit(0)
 
-    df = pd.concat(star_results, keys=star_timestamps, names=['date','HIP'])
+    star_list = list(map(lambda x: x['stars'], results))
+    timestamp_list = list(map(lambda x: x['timestamp'], results))
+    if args['--cloudtrack']:
+        cloudmap_list = list(map(lambda x: x['cloudmap'], results))
+
+    df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
     del results
-    del star_results
-    del star_timestamps
+    del star_list
+    del timestamp_list
 
     df.sortlevel(inplace=True)
     #d.loc[(slice(None), 746), :]
@@ -199,8 +203,6 @@ def main(args):
     # we need a big data set for averaging, so only stars with > 10 data points are allowed
     df.reset_index(inplace=True)
     df = df.groupby('HIP').filter(lambda x : len(x.index) > 10)
-    
-    embed()
 
     if args['--airmass']:
         if not args['--debug']:
@@ -284,21 +286,7 @@ def main(args):
             plt.hist(r[:,3], bins=100, range=(-1,2))
             plt.show()
             print(popt, pcov)
-
-
-
-
-    def logf(x, m, b):
-        return 10**(m*x+b)
-
-    fit_stars = df.query('0 < vmag < {}'.format(float(config['image']['vmaglimit'])))
-    popt, pcov = curve_fit(logf, fit_stars.vmag.values, fit_stars.response.values, sigma=1/fit_stars.vmag.values, p0=(-0.2, 2))
-    x = np.linspace(-3+fit_stars.vmag.min(), fit_stars.vmag.max(), 20)
-    y = logf(x, popt[0], popt[1]-0.3)
-    lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
-    y1 = 10**(x*float(lim[1][0]) + float(lim[1][1]))
-    y2 = 10**(x*float(lim[0][0]) + float(lim[0][1]))
-    sys.exit(0)
+            del grouped
 
 
     if args['--response']:
@@ -323,8 +311,29 @@ def main(args):
             plt.show()
         plt.close('all')
     
+    if args['--cloudtrack']:
+        ct = cloud_tracker.CloudTracker(config['image'])
+        for cloudmap in cloudmap_list:
+            ct.update(cloudmap)
+
+        print('Tracking done')
     
 
+    '''
+    def logf(x, m, b):
+        return 10**(m*x+b)
+
+    sys.exit(0)
+    fit_stars = df.query('0 < vmag < {}'.format(float(config['image']['vmaglimit'])))
+    popt, pcov = curve_fit(logf, fit_stars.vmag.values, fit_stars.response.values, sigma=1/fit_stars.vmag.values, p0=(-0.2, 2))
+    x = np.linspace(-3+fit_stars.vmag.min(), fit_stars.vmag.max(), 20)
+    y = logf(x, popt[0], popt[1]-0.3)
+    lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
+    y1 = 10**(x*float(lim[1][0]) + float(lim[1][1]))
+    y2 = 10**(x*float(lim[0][0]) + float(lim[0][1]))
+    '''
+
+    '''
     fig = plt.figure(figsize=(16,9))
     ax = plt.subplot(111)
     #if args['--function'] == 'Grad':
@@ -337,7 +346,7 @@ def main(args):
             x='vmag',y='response', color='k', ax=ax, logy=True, grid=True, label='Kernel Response - cloud')
     ax.set_ylim((1e-5,1))
     plt.show()
-
+    '''
 
 
 

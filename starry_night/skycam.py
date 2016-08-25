@@ -777,25 +777,28 @@ def process_image(images, celestialObjects, config, args):
     '''
     log = logging.getLogger(__name__)
 
+    output = dict()
+
 
     log.info('Processing image taken at: {}'.format(images['timestamp']))
     observer = obs_setup(config['properties'])
     observer.date = images['timestamp']
+    output['timestamp'] = images['timestamp']
 
     # stop processing if sun is too high or config file does not match
     if images['img'].shape[1]  != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):
         log.error('Resolution does not match: {}!={}. Wrong config file?'.format(c_res, i_res))
-        return
+        return output
     sun = ephem.Sun()
     sun.compute(observer)
     moon = ephem.Moon()
     moon.compute(observer)
     if np.rad2deg(sun.alt) > -10:
         log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
-        return
+        return output
     elif np.rad2deg(moon.alt) > -10:
         log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
-        return
+        return output
 
     # create cropping array to mask unneccessary image regions.
     img = images['img']
@@ -909,17 +912,13 @@ def process_image(images, celestialObjects, config, args):
         df = kernelResults[0]
 
     if args['--cam']:
+        output['img'] = img
         fig = plt.figure()
-        #k = 1
-        #resp = skimage.filters.gaussian(img, sigma=k) - skimage.filters.gaussian(img, sigma=6*k)
-        #img = resp
         vmin = np.nanpercentile(img, 0.5)
         vmax = np.nanpercentile(img, 99.)
         plt.imshow(img,vmin=vmin,vmax=vmax, cmap='gray')
         stars.plot.scatter(x='x',y='y', ax=plt.gca(), c=stars.visible.values, cmap = plt.cm.RdYlGn, vmin=0, vmax=1, grid=True)
         plt.colorbar()
-        plt.show()
-
 
         if args['-s']:
             plt.savefig('cam_image_{}.pdf'.format(images['timestamp'].isoformat()))
@@ -1032,36 +1031,36 @@ def process_image(images, celestialObjects, config, args):
             if args['-s']:
                 plt.savefig('rateScan.pdf')
             plt.close('all')
+
+            output['response'] = response
+            output['thresh'] = thresh
+            output['minThresh'] = minThresholds
             del grad
             del sobel
             del lap
 
-    if args['--cloudmap']:
+    if args['--cloudmap'] or args['--cloudtrack']:
         log.debug('Calculating cloud map')
-        ax1 = plt.subplot(121)
-        vmin = np.nanpercentile(img, 5.5)
-        vmax = np.nanpercentile(img, 99.9)
-        ax1.imshow(img, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
-        ax1.grid()
+        cloud_map = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=True)
+        cloud_map[crop_mask] = np.NaN
+        if args['--cloudtrack']:
+            output['cloudmap'] = cloud_map
+        if args['--cloudmap']:
+            ax1 = plt.subplot(121)
+            vmin = np.nanpercentile(img, 5.5)
+            vmax = np.nanpercentile(img, 99.9)
+            ax1.imshow(img, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
+            ax1.grid()
 
-        ax2 = plt.subplot(122)
-        #cloud_map1 = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=False)
-        #cloud_map1[crop_mask] = 0
-        cloud_map2 = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=True)
-        cloud_map2[crop_mask] = 0
-        ax2.imshow(cloud_map2, cmap='gray_r',vmin=0,vmax=1)
-        ax2.grid()
-        if args['-s']:
-            plt.savefig('cloudMap_{}.png'.format(images['timestamp'].isoformat()))
-        if args['-v']:
-            plt.show()
-        plt.close('all')
-        embed()
+            ax2 = plt.subplot(122)
+            ax2.imshow(cloud_map, cmap='gray_r',vmin=0,vmax=1)
+            ax2.grid()
+            if args['-s']:
+                plt.savefig('cloudMap_{}.png'.format(images['timestamp'].isoformat()))
+            if args['-v']:
+                plt.show()
+            plt.close('all')
 
-
-    timestamp = images['timestamp']
     del images
-    try:
-        return stars, timestamp, response, thresh
-    except UnboundLocalError:
-        return stars, timestamp, (np.NaN,np.NaN,np.NaN)
+    output['stars'] = stars
+    return output
