@@ -50,7 +50,7 @@ def transmission3(x, a, c):
     This model does not return 1.0 for zenith angle so we subtract airM_0 instead
     '''
     yObs=2.2
-    yAtm=9.9
+    yAtm=9.5
     rEarth=6371.0
 
     x = (np.pi/2 -x)
@@ -59,20 +59,19 @@ def transmission3(x, a, c):
 
     airMass = np.sqrt( ( r + y )**2 * np.cos(x)**2 + 2.*r*(1.-y) - y**2 + 1.0 ) - (r+y)*np.cos(x)
     airM_0 = np.sqrt( ( r + y )**2 + 2.*r*(1.-y) - y**2 + 1.0 ) - (r+y)
-    return a* np.exp(-c * (airMass - airM_0))
+    return a* np.exp(-c * (airMass - airM_0 ))
 
 '''
 y1 = sk.transmission(x, 1, 0.57)
 y2 = sk.transmission2(x, 1, 0.57)
-y3 = sk.transmission3(x, 1, 0.57, yObs=0.0, yAtm=9)
-y4 = sk.transmission3(x, 1, 0.57, yObs=2.2, yAtm=9)
+y4 = sk.transmission3(x, 1, 0.67)
 
 plt.plot(x,y1, label='Planar')
 plt.plot(x,y2, label='Planar korrektur')
-plt.plot(x,y3, label='geom NN')
 plt.plot(x,y4, label='geom 2200m')
 plt.grid()
-plt.legend()
+plt.ylim((0, 1.1))
+plt.legend(loc='lower right')
 plt.show()
 '''
 
@@ -856,7 +855,7 @@ def process_image(images, celestialObjects, config, args):
         # correct atmospherice absorbtion
         lim = split('\\s*,\\s*', config['calibration']['airmass_absorbtion'])
         stars['response_orig'] = stars.response
-        stars['response'] = stars.response / transmission2(stars.altitude, 1.0, float(lim[0]))
+        stars['response'] = stars.response / transmission3(stars.altitude, 1.0, float(lim[0]))
         
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)

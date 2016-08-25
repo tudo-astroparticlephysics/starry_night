@@ -257,7 +257,6 @@ def main(args):
                 #maxVal = group[1].query('altitude > {}'.format(np.percentile(group[1].altitude, 90))).response_orig.mean()
                 x = group[1].sort_values('altitude').altitude.values
                 y = group[1].sort_values('altitude').response_orig.values
-                print(group[1].HIP.max())
                 try:
                     #popt, pcov = curve_fit(skycam.transmission2, x, y, p0=[0, 0.57])
                     popt, pcov = curve_fit(skycam.transmission3, x, y, p0=[0, 0.57])
@@ -266,7 +265,7 @@ def main(args):
                     # this might happen in a few cases where we have a small amount of data points with dark stars that fluctuate very much
                     continue
 
-                r.append((group[1].vmag.values.max(), popt[0], np.sqrt(pcov[0,0]), popt[1], np.sqrt(pcov[1,1]) ))
+                r.append((group[1].altitude.values.max(), popt[0], np.sqrt(pcov[0,0]), popt[1], np.sqrt(pcov[1,1]) ))
 
 
             # do a fit of all transmissions
@@ -281,6 +280,8 @@ def main(args):
             plt.plot(x,y, color='red', label='linear regression')
             plt.grid()
             plt.legend()
+            plt.show()
+            plt.hist(r[:,3], bins=100, range=(-1,2))
             plt.show()
             print(popt, pcov)
 
