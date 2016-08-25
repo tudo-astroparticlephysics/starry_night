@@ -22,6 +22,7 @@ Options:
     --response      Plot response vs Magnitude in log scale 
     --cloudmap      Create cloud map of the sky
     --single        Display information for each single image
+    --airmass      Calculate airmass absorbtion
     --version       Show version.
     --debug         debug it [default: False]
 '''
@@ -33,17 +34,18 @@ import logging
 import os
 import sys
 import time
-import matplotlib.pyplot as plt
-from matplotlib import rc
-from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import configparser
+import matplotlib.pyplot as plt
 import skimage.filters
+from matplotlib import rc, cm
+from datetime import datetime, timedelta
 from multiprocessing import Pool
 from functools import partial
 from scipy.optimize import curve_fit
 from re import split
+from collections import Counter
 
 from starry_night import skycam
 from IPython import embed
@@ -94,6 +96,7 @@ def main(args):
 
     config = configparser.RawConfigParser()
     log.debug('Parsing config file: {}'.format(args['-c']))
+    # c!=0 if config was read successfully
     if '.' in args['-c'] or '/' in args['-c']:
         c = len(config.read(args['-c']))
     else:
@@ -171,6 +174,9 @@ def main(args):
             results.pop(i)
         else:
             i+=1
+    
+    imgCount = len(results)
+    log.info('{} images were processed successfully.'.format(imgCount))
 
     # no more processing if one or less images were processed successfully
     #if len(results) <= 1:
@@ -182,11 +188,105 @@ def main(args):
     del results
     del star_results
     del star_timestamps
+
+    df.sortlevel(inplace=True)
     #d.loc[(slice(None), 746), :]
     #d.loc[(slice(None), 746),:]['response3'].plot.hist(10)
 
     mean = df.mean(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
     std = df.std(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
+
+    # we need a big data set for averaging, so only stars with > 10 data points are allowed
+    df.reset_index(inplace=True)
+    df = df.groupby('HIP').filter(lambda x : len(x.index) > 10)
+    
+    embed()
+
+    if args['--airmass']:
+        if not args['--debug']:
+            log.error('This option is only available in debug mode')
+        else:
+            '''
+            new_df['erwartet'] = 10**skycam.lin(new_df.vmag.values, popt[0], popt[1])
+            new_df['diff'] = new_df['response'] / new_df['erwartet']
+            new_df['diff2'] = (new_df['response'] / new_df['erwartet'])**(1/new_df['erwartet'])
+
+            a = df.query('altitude > {}'.format(80*np.pi/180)).groupby('HIP').filter(lambda x : len(x) > 10).groupby('HIP').response.mean()
+            a = df.join(a, on='HIP', rsuffix='r').dropna()
+            '''
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            vmag_to_plot = np.arange(0, 6.1, 0.5)
+            color = cm.jet(np.linspace(0,1,len(vmag_to_plot)))
+
+            grouped = df.groupby('HIP')
+            #remove stars that do not have a wide enough span of their altitude for plotting
+            plot_df = grouped.filter(lambda x: x.altitude.max() > 80*np.pi/180 and x.altitude.min() < 15*np.pi/180)
+            for i, vmag in enumerate(vmag_to_plot):
+                c = color[i]
+                # get star with magnitude closest to 'vmag'
+                # ignore 2 stars with HIP because they are not good examples for the plot
+                to_plot = plot_df.query(
+                        'HIP == {}'.format(
+                        plot_df.ix[(plot_df.query('HIP != 75312 and HIP != 52686').vmag-vmag).abs().sort(inplace=False).index[0]].HIP
+                    )
+                ).sort_values('altitude')
+
+                if abs(to_plot.vmag.max() - vmag)>=0.5:
+                    # dont plot, if magnitude differs too much
+                    continue
+               
+                #maxVal = to_plot.query('altitude > {}'.format(np.percentile(to_plot.altitude, 90))).response_orig.mean()
+                #popt, pcov = curve_fit(skycam.transmission2, to_plot.altitude.values, to_plot.response_orig.values, p0=[0,0.57])
+                popt, pcov = curve_fit(skycam.transmission3, to_plot.altitude.values, to_plot.response_orig.values, p0=[0,0.57])
+
+                ax.scatter(x=to_plot['altitude']/np.pi*180, y=to_plot['response_orig'], c=c, label='vmag = {}'.format(to_plot.vmag.max()))
+                ax.plot(to_plot.altitude/np.pi*180, skycam.transmission2(to_plot.altitude.values, popt[0], popt[1]), c=c)
+                print(vmag, to_plot.HIP.max(), popt)
+
+            ax.semilogy()
+            ax.grid()
+            ax.legend(loc='upper right')
+            del plot_df, to_plot
+            plt.show()
+
+            r = []
+
+            # fit transmission for each star
+            for group in grouped:
+                #maxVal = group[1].query('altitude > {}'.format(np.percentile(group[1].altitude, 90))).response_orig.mean()
+                x = group[1].sort_values('altitude').altitude.values
+                y = group[1].sort_values('altitude').response_orig.values
+                try:
+                    #popt, pcov = curve_fit(skycam.transmission2, x, y, p0=[0, 0.57])
+                    popt, pcov = curve_fit(skycam.transmission3, x, y, p0=[0, 0.57])
+                except RuntimeError:
+                    # skip group if fit does not converge
+                    # this might happen in a few cases where we have a small amount of data points with dark stars that fluctuate very much
+                    continue
+
+                r.append((group[1].altitude.values.max(), popt[0], np.sqrt(pcov[0,0]), popt[1], np.sqrt(pcov[1,1]) ))
+
+
+            # do a fit of all transmissions
+            r = np.array(r)
+            popt, pcov = curve_fit(skycam.lin, r[:,0], r[:,3], sigma=r[:,4], p0=[0,0])
+            x = np.linspace(-2,8,5)
+            y = skycam.lin(x, popt[0], popt[1])
+
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            plt.errorbar(r[:,0], r[:,3], yerr=r[:,4], linestyle='', color='blue', marker='o', ms=2)
+            plt.plot(x,y, color='red', label='linear regression')
+            plt.grid()
+            plt.legend()
+            plt.show()
+            plt.hist(r[:,3], bins=100, range=(-1,2))
+            plt.show()
+            print(popt, pcov)
+
+
+
 
     def logf(x, m, b):
         return 10**(m*x+b)
