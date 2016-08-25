@@ -76,3 +76,16 @@ def test_getBlobsize():
     image[26,25]=-np.NaN
     b = skycam.getBlobsize(image, 2)
     eq_(b, 202, 'Blob at border failed: {}'.format(b))
+
+def test_invert_radius_theta():
+    theta,r = 0.2, 5
+    b = skycam.r2theta(skycam.theta2r(theta, r), r)
+    eq_(round(b,4), 0.2, 'Invert radius 1 failed: {}'.format(b))
+    
+    theta,r = 0, 5
+    b = skycam.r2theta(skycam.theta2r(theta, r, how='notLin'), r, how='notLin')
+    eq_(b, 0, 'Invert radius 2 failed: {}'.format(b))
+
+    theta,r = np.pi, 5
+    b = skycam.r2theta(skycam.theta2r(theta, r, how='notLin'), r, how='notLin')
+    eq_(round(b,4), round(np.pi,4), 'Invert radius 3 failed: {}'.format(b))
