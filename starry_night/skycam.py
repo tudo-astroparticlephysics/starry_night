@@ -783,7 +783,6 @@ def process_image(images, celestialObjects, config, args):
     log.info('Processing image taken at: {}'.format(images['timestamp']))
     observer = obs_setup(config['properties'])
     observer.date = images['timestamp']
-    output['timestamp'] = images['timestamp']
 
     # stop processing if sun is too high or config file does not match
     if images['img'].shape[1]  != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):
@@ -799,6 +798,9 @@ def process_image(images, celestialObjects, config, args):
     elif np.rad2deg(moon.alt) > -10:
         log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
         return output
+
+    # put timestamp into output dict
+    output['timestamp'] = images['timestamp']
 
     # create cropping array to mask unneccessary image regions.
     img = images['img']

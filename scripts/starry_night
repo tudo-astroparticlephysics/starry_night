@@ -167,8 +167,8 @@ def main(args):
             pool.close()
             pool.join()
 
-    # drop all 'None' elements (image processing was aborted because of high sun)
-    # and merge the remaining files into one multiindex dataframe
+    # drop all empty dics (image processing was aborted because of high sun)
+    # and merge the remaining files
     i=0
     while i<len(results):
         if not results[i]:
