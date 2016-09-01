@@ -1,20 +1,21 @@
+import pandas as pd
 import numpy as np
-from numpy import sin, cos, tan, arctan2, arcsin, pi
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid.inset_locator import inset_axes
 
-import pandas as pd
 import ephem
 import sys
+from time import sleep
 
+from astropy.io import fits
 from scipy.io import matlab
+from scipy.ndimage.measurements import label
 from io import BytesIO
 from skimage.io import imread
 from skimage.color import rgb2gray
+import skimage.filters
 
-from astropy.io import fits
 from datetime import datetime, timedelta
-from time import sleep
 
 from pkg_resources import resource_filename
 from os.path import join
@@ -23,8 +24,8 @@ import logging
 
 from re import split
 from hashlib import sha1
-import skimage.filters
-from scipy.ndimage.measurements import label
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError, InternalError
 from IPython import embed
 
 
@@ -315,11 +316,11 @@ def equatorial2horizontal(ra, dec, observer):
     obs_lat = float(observer.lat)
 
     h = observer.sidereal_time() - ra
-    alt = arcsin(sin(obs_lat) * sin(dec) + cos(obs_lat) * cos(dec) * cos(h))
-    az = arctan2(sin(h), cos(h) * sin(obs_lat) - tan(dec)*cos(obs_lat))
+    alt = np.arcsin(np.sin(obs_lat) * np.sin(dec) + np.cos(obs_lat) * np.cos(dec) * np.cos(h))
+    az = np.arctan2(np.sin(h), np.cos(h) * np.sin(obs_lat) - np.tan(dec)*np.cos(obs_lat))
 
     # correction for camera orientation
-    az = np.mod(az+pi, 2*pi)
+    az = np.mod(az+np.pi, 2*np.pi)
     return az, alt
 
 
@@ -488,7 +489,7 @@ def findLocalMaxValue(img, x, y, radius):
     try:
         x = int(x)
         y = int(y)
-    except:
+    except TypeError:
         x = x.astype(int)
         y = y.astype(int)
     
@@ -517,7 +518,7 @@ def findLocalMaxPos(img, x, y, radius):
     try:
         x = int(x)
         y = int(y)
-    except:
+    except TypeError:
         x = x.astype(int)
         y = y.astype(int)
     # get interval border
@@ -610,7 +611,7 @@ def get_crop_mask(img, crop):
                     disk_mask = disk_mask | ((row - int(y))**2 + (col - int(x))**2 > int(r)**2)
                 else:
                     disk_mask = disk_mask | ((row - int(y))**2 + (col - int(x))**2 < int(r)**2)
-        except:
+        except ValueError:
             log = logging.getLogger(__name__)
             log.error('Cropping failed, maybe there is a typing error in the config file?')
             raise
@@ -720,10 +721,6 @@ def calc_cloud_map(stars, rng, img_shape, weight=False):
     and convolve them with an gaussian kernel resulting in some kind of 'density map'.
     Division of both maps yields the desired cloudines map.
     '''
-    nrows = ncols = rng*2 +1
-    row, col = np.ogrid[:nrows, :ncols]
-    disk_mask = np.zeros((nrows, ncols))
-    disk_mask[((row - rng)**2 + (col - rng)**2 < int(rng)**2)] = 1
     if weight:
         scattered_stars_visible,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=stars.visible.values * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
         scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, weights=np.ones(len(stars.index)) * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
@@ -1067,15 +1064,26 @@ def process_image(images, celestialObjects, config, args):
 
     del images
     output['stars'] = stars
-    embed()
 
     if args['--sql'] or args['--low-memory']:
-        slimOutput = 0
-        del output['stars']
-        del output['img']
-        try:
-            del output['cloudmap']
-        except: pass
-
+        slimOutput = pd.DataFrame()
+        for key in ['timestamp', 'hash', 'bla']:
+            try:
+                slimOutput[key] = [output[key]]
+            except KeyError:
+                pass
+                
+        if args['--sql']:
+            try:
+                connection = create_engine(config['SQL']['connection'])
+                slimOutput.to_sql(config['SQL']['table'], con=connection, if_exists='append', index=False)
+            except (OperationalError):
+                log.error('Writing to SQL server failed. Server up? Password correct?')
+            except InternalError as e:
+                log.error('Error while writing to SQL server: {}'.format(e))
+        if args['--low-memory']:
+            del output
+            output = slimOutput
+            del slimOutput
 
     return output

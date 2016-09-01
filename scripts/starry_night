@@ -114,8 +114,8 @@ def main(args):
         sys.exit(1)
 
     if args['--sql']:
-        log.info('Storing results in SQL Database.\nConnection: {}\nPlease enter password'.format(config['sql']['connection']))
-        config['sql']['connection'] = config['sql']['connection'].format(getpass())
+        log.info('Storing results in SQL Database.\nConnection: {}\nPlease enter password'.format(config['SQL']['connection']))
+        config['SQL']['connection'] = config['SQL']['connection'].format(getpass())
     log.debug('Parsing Catalogue')
     celestialObjects = skycam.star_planets_sun_moon_dict()
 
