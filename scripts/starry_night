@@ -17,13 +17,17 @@ Options:
     --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG', 'All')
                     Using option '--ratescan' implies 'LoG'. [default: LoG]
 
-    --cam           Show camera image
-    --ratescan      Create ratescan-like plot of visibility threshold
+    --cam           Display camera image
+    --ratescan      Create ratescan-like plot of visibility vs kernel response threshold
     --response      Plot response vs Magnitude in log scale 
     --cloudmap      Create cloud map of the sky
     --cloudtrack    Track and predict clouds as they move
-    --single        Display information for each single image
+    --single        Display information for every single image
     --airmass       Calculate airmass absorbtion
+    --sql           Store results in SQL database
+    --low-memory    Don't store results of each image in memory for final processing. 
+                    Use this option if you are not planning to merge the results because the 
+                    amount of files is too big or because you run this as a daemon at night. 
     --version       Show version.
     --debug         debug it [default: False]
 '''
@@ -47,6 +51,7 @@ from functools import partial
 from scipy.optimize import curve_fit
 from re import split
 from collections import Counter
+from getpass import getpass
 
 from starry_night import skycam, cloud_tracker
 from IPython import embed
@@ -108,6 +113,9 @@ def main(args):
         log.error('Unable to parse config file. Does the file exist?')
         sys.exit(1)
 
+    if args['--sql']:
+        log.info('Storing results in SQL Database.\nConnection: {}\nPlease enter password'.format(config['sql']['connection']))
+        config['sql']['connection'] = config['sql']['connection'].format(getpass())
     log.debug('Parsing Catalogue')
     celestialObjects = skycam.star_planets_sun_moon_dict()
 

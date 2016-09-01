@@ -22,6 +22,7 @@ import requests
 import logging
 
 from re import split
+from hashlib import sha1
 import skimage.filters
 from scipy.ndimage.measurements import label
 from IPython import embed
@@ -74,7 +75,6 @@ plt.ylim((0, 1.1))
 plt.legend(loc='lower right')
 plt.show()
 '''
-
 
 def downloadImg(url, *args, **kwargs):
     imgList = list()
@@ -799,8 +799,9 @@ def process_image(images, celestialObjects, config, args):
         log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
         return output
 
-    # put timestamp into output dict
+    # put timestamp and hash sum into output dict
     output['timestamp'] = images['timestamp']
+    output['hash'] = sha1(images['img'].data).hexdigest()
 
     # create cropping array to mask unneccessary image regions.
     img = images['img']
@@ -1055,7 +1056,7 @@ def process_image(images, celestialObjects, config, args):
             ax1.grid()
 
             ax2 = plt.subplot(122)
-            ax2.imshow(cloud_map, cmap='gray_r',vmin=0,vmax=1)
+            ax2.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
             ax2.grid()
             if args['-s']:
                 plt.savefig('cloudMap_{}.png'.format(images['timestamp'].isoformat()))
@@ -1065,4 +1066,15 @@ def process_image(images, celestialObjects, config, args):
 
     del images
     output['stars'] = stars
+    embed()
+
+    if args['--sql'] or args['--low-memory']:
+        slimOutput = 0
+        del output['stars']
+        del output['img']
+        try:
+            del output['cloudmap']
+        except: pass
+
+
     return output
