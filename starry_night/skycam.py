@@ -49,7 +49,7 @@ def transmission2(x, a, c):
 def transmission3(x, a, c):
     '''
     return atmospheric transmission of spheric model with elevated observer
-    This model does not return 1.0 for zenith angle so we subtract airM_0 instead
+    This model does not return 1.0 for zenith angle so we subtract airM_0 instead in the end
     '''
     yObs=2.2
     yAtm=9.5
@@ -276,6 +276,21 @@ def horizontal2image(az, alt, cam):
         raise
     return x, y
 
+def find_matching_pos(img_timestamp, time_pos_list):
+    '''
+    Returns 'Ra' and 'Dec' entry from 'time_pos_list' 
+    that has the closest timestamp to 'img_timestamp'+5min
+
+    Since the lidar operates all the time but we only take images every few minutes 
+    we need to find out where the lidar was looking at that point in time when we took the image
+    '''
+
+    # select measurements that were taken not later than 5 minutes before the image
+    subset = time_pos_list.query('1/24/60 * 5 < MJD - {} < 1/24/60*10'.format(img_timestamp)).sort_values('MJD')
+    closest = subset[subset.MJD==subset.MJD.min()]
+    return closest[['Ra','Dec']].values
+
+
 
 def obs_setup(properties):
     ''' creates an ephem.Observer for the MAGIC Site at given date '''
@@ -324,7 +339,7 @@ def equatorial2horizontal(ra, dec, observer):
     return az, alt
 
 
-def star_planets_sun_moon_dict():
+def celObjects_dict(config):
     '''
     Read the given star catalog, add planets from ephem and fill sun and moon with NaNs
     For horizontal coordinates 'update_star_position()' needs to be called next.
@@ -335,14 +350,18 @@ def star_planets_sun_moon_dict():
     
     log.debug('Loading stars')
     catalogue = resource_filename('starry_night', 'data/catalogue_10vmag_1degFilter.csv')
-    stars = pd.read_csv(
-        catalogue,
-        sep=',',
-        comment='#',
-        header=0,
-        skipinitialspace=False,
-        index_col=0,
-    )
+    try:
+        stars = pd.read_csv(
+            catalogue,
+            sep=',',
+            comment='#',
+            header=0,
+            skipinitialspace=False,
+            index_col=0,
+        )
+    except OSError as e:
+        log.error('Star catalogue not found: {}'.format(e))
+        sys.exit(1)
     #stars = stars.to_numeric()
 
     # transform degrees to radians
@@ -358,6 +377,8 @@ def star_planets_sun_moon_dict():
         data = {
             'ra': np.NaN,
             'dec': np.NaN,
+            'altitude' : np.NaN,
+            'azimuth' : np.NaN,
             'gLon': np.NaN,
             'gLat': np.NaN,
             'vmag': np.NaN,
@@ -365,12 +386,29 @@ def star_planets_sun_moon_dict():
         }
         planets = planets.append(data, ignore_index=True)
 
+    # add points_of_interest
+    try:
+        points_of_interest = pd.read_csv(
+            config['analysis']['points_of_interest'],
+            sep=',',
+            comment='#',
+            header=0,
+            skipinitialspace=False,
+            index_col=None,
+        )
+    except OSError as e:
+        log.error('File with points of interest not found: {}'.format(e))
+        sys.exit(1)
+    points_of_interest['altitude'] = np.NaN
+    points_of_interest['azimuth'] = np.NaN
+
+    # add moon
     moonData = {
         'moonPhase' : np.NaN,
         'altitude' : np.NaN,
         'azimuth' : np.NaN,
     }
-
+    # add sun
     sunData = {
         'altitude' : np.NaN,
         'azimuth' : np.NaN,
@@ -378,12 +416,13 @@ def star_planets_sun_moon_dict():
 
     return dict({'stars': stars,
         'planets': planets,
+        'points_of_interest' : points_of_interest,
         'sun': sunData,
         'moon': moonData,
         })
 
 
-def update_star_position(celestialObjects, observer, cam, crop):
+def update_star_position(const_celestialObjects, observer, conf, crop):
     '''
     Takes the dictionary from 'star_planets_sun_moon_dict(observer)'
     and calculates the current position of each object in the sky
@@ -442,14 +481,21 @@ def update_star_position(celestialObjects, observer, cam, crop):
         planets = planets.append(data, ignore_index=True)
     planets.set_index('name', inplace=True)
 
-    # remove stars and planets that are not within the limits
+    # update all objects
+    # remove objects that are not within the limits
+    # make a copy here, because we will need ALL stars later again
     try:
-        stars = celestialObjects['stars'].copy()
+        stars = const_celestialObjects['stars'].copy()
+        points_of_interest = const_celestialObjects['points_of_interest'].copy()
         stars['azimuth'], stars['altitude'] = equatorial2horizontal(
             stars.ra, stars.dec, observer,
         )
-        stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(cam['openingangle'])), cam['vmaglimit']), inplace=True)
-        planets.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(cam['openingangle'])), cam['vmaglimit']), inplace=True)
+        points_of_interest['azimuth'], points_of_interest['altitude'] = equatorial2horizontal(
+            points_of_interest.ra, points_of_interest.dec, observer,
+        )
+        stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), conf['analysis']['vmaglimit']), inplace=True)
+        planets.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), conf['analysis']['vmaglimit']), inplace=True)
+        points_of_interest.query('altitude > {}'.format(np.deg2rad(90 - float(conf['image']['openingangle']))), inplace=True)
     except:
         log.error('Using altitude or vmag limit failed!')
         raise
@@ -462,24 +508,29 @@ def update_star_position(celestialObjects, observer, cam, crop):
     planets['angleToMoon'] = np.arccos(np.sin(planets.altitude.values)*
         np.sin(moon.alt) + np.cos(planets.altitude.values)*np.cos(moon.alt)*
         np.cos((planets.azimuth.values - moon.az)))
+    points_of_interest['angleToMoon'] = np.arccos(np.sin(points_of_interest.altitude.values)*
+        np.sin(moon.alt) + np.cos(points_of_interest.altitude.values)*np.cos(moon.alt)*
+        np.cos((points_of_interest.azimuth.values - moon.az)))
 
     # remove stars and planets that are too close to moon
-    stars.query('angleToMoon > {}'.format(np.deg2rad(float(cam['minAngleToMoon']))), inplace=True)
-    planets.query('angleToMoon > {}'.format(np.deg2rad(float(cam['minAngleToMoon']))), inplace=True)
+    stars.query('angleToMoon > {}'.format(np.deg2rad(float(conf['analysis']['minAngleToMoon']))), inplace=True)
+    planets.query('angleToMoon > {}'.format(np.deg2rad(float(conf['analysis']['minAngleToMoon']))), inplace=True)
 
 
     # calculate x and y position
     log.debug('Calculate x and y')
-    stars['x'], stars['y'] = horizontal2image(stars.azimuth, stars.altitude, cam=cam)
-    planets['x'], planets['y'] = horizontal2image(planets.azimuth, planets.altitude, cam=cam)
-    moonData['x'], moonData['y'] = horizontal2image(moonData['azimuth'], moonData['altitude'], cam=cam)
-    sunData['x'], sunData['y'] = horizontal2image(sunData['azimuth'], sunData['altitude'], cam=cam)
+    stars['x'], stars['y'] = horizontal2image(stars.azimuth, stars.altitude, cam=conf['image'])
+    planets['x'], planets['y'] = horizontal2image(planets.azimuth, planets.altitude, cam=conf['image'])
+    points_of_interest['x'], points_of_interest['y'] = horizontal2image(points_of_interest.azimuth, points_of_interest.altitude, cam=conf['image'])
+    moonData['x'], moonData['y'] = horizontal2image(moonData['azimuth'], moonData['altitude'], cam=conf['image'])
+    sunData['x'], sunData['y'] = horizontal2image(sunData['azimuth'], sunData['altitude'], cam=conf['image'])
 
     # remove stars and planets that are withing cropping area
-    stars = stars[stars.apply(lambda x, crop=crop: ~crop[int(x['y']), int(x['x'])], axis=1)]
-    planets = planets[planets.apply(lambda x, crop=crop: ~crop[int(x['y']), int(x['x'])], axis=1)]
+    stars = stars[stars.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
+    planets = planets[planets.apply(lambda p, crop=crop: ~crop[int(p['y']), int(p['x'])], axis=1)]
+    points_of_interest = points_of_interest[points_of_interest.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
 
-    return {'stars':stars, 'planets':planets, 'moon': moonData, 'sun': sunData}
+    return {'stars':stars, 'planets':planets, 'points_of_interest': points_of_interest, 'moon': moonData, 'sun': sunData}
 
 
 def findLocalMaxValue(img, x, y, radius):
@@ -578,12 +629,12 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             sys.exit(1)
         try:
             if fmt is None:
-                time = datetime.strptime(filename, config['image']['timeformat'])
+                time = datetime.strptime(filename, config['properties']['timeformat'])
             else:
                 time = datetime.strptime(filename, fmt)
         
         except ValueError:
-            fmt = (config['image']['timeformat'] if fmt is None else fmt)
+            fmt = (config['properties']['timeformat'] if fmt is None else fmt)
             log.error('{},{}'.format(filename,filepath))
             log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
             raise
@@ -662,17 +713,18 @@ def isInRange(position, stars, rng, unit='deg'):
         raise ValueError
     
     if unit == 'pixel':
-        if type(position) == dict:
+        try:
             return ((position.x - stars.x)**2 + (position.y - stars.y)**2 <= rng**2)
-        else:
-            return ((position[0] - stars.x)**2 + (position[1] - stars.y)**2 <= rng**2)
+        except AttributeError as e:
+            log.error('Pixel value needed but object has no x/y attribute. {}'.format(e))
+            sys.exit(1)
     elif unit == 'deg':
-        if type(position) == dict:
+        try:
             ra1 = position['ra']
             dec1 = position['dec']
-        else:
-            ra1 = position[0]
-            dec1 = position[1]
+        except AttributeError as e:
+            log.error('Degree value needed but object has no ra/dec attribute. {}'.format(e))
+            sys.exit(1)
 
         deltaDeg = 2*np.arcsin(np.sqrt(np.sin((dec1-stars.dec)/2)**2 + np.cos(dec1)*np.cos(stars.dec)*np.sin((ra1-stars.ra)/2)**2))
         return deltaDeg <= np.deg2rad(rng)
@@ -680,25 +732,38 @@ def isInRange(position, stars, rng, unit='deg'):
         raise ValueError('unit has unknown type')
 
 
-def calc_star_percentage(position, stars, rng, unit='deg', weight=False):
+def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
     '''
-    Returns percentage of visible stars that are within range of position
+    Returns: percentage of visible stars that are within range of position
+             and -1 if no stars in range
     
     Position is dictionary and can contain Ra,Dec and/or x,y
     Range is degree or pixel radius depending on whether unit is 'grad' or 'pixel'
+    Lim is limit visibility that separates visible stars from not visible. [0.0 - 1.0]. If
+    lim < 0 then all stars in range will be used and 'visible' is a weight factor
     '''
+
     if rng < 0:
         starsInRange = stars
     else:
         starsInRange = stars[isInRange(position, stars, rng, unit)]
 
+
     try:
-        if weight:
-            vis = np.sum(np.pow(100**(1/5),starsInRange.query('visible == 1').vmag.values))
-            notVis = np.sum(np.pow(100**(1/5),starsInRange.query('visible == 0').vmag.values))
-            percentage = vis/(vis+notVis)
+        if lim >= 0:
+            if weight:
+                vis = np.sum(np.power(100**(1/5), -starsInRange.query('visible >= {}'.format(lim)).vmag.values))
+                notVis = np.sum(np.power(100**(1/5), -starsInRange.query('visible < {}'.format(lim)).vmag.values))
+                percentage = vis/(vis+notVis)
+            else:
+                percentage = len(starsInRange.query('visible >= {}'.format(lim)).index)/len(starsInRange.index)
         else:
-            percentage = len(starsInRange.query('visible == 1').index)/len(starsInRange.index)
+            if weight:
+                percentage = np.sum(starsInRange.visible.values * np.power(100**(1/5),-starsInRange.vmag.values)) / \
+                    np.sum(np.power(100**(1/5),-starsInRange.vmag.values))
+            else:
+                percentage = np.mean(starsInRange.visible.values)
+
     except ZeroDivisionError:
         #log = logging.getLogger(__name__)
         #log.warning('No stars in range to calc percentage. Returning -1.')
@@ -768,7 +833,7 @@ def filter_catalogue(catalogue, rng):
     return index
 
 
-def process_image(images, celestialObjects, config, args):
+def process_image(images, const_celestialObjects, config, args):
     '''
     This function applies all neccessary calculations to an image and returns the results.
     Use it in the main loop!
@@ -806,26 +871,25 @@ def process_image(images, celestialObjects, config, args):
     crop_mask = get_crop_mask(img, config['crop'])
 
     # update celestial objects (ignore planets, because they are bigger than stars and mess up the detection)
-    celObjects = update_star_position(celestialObjects, observer, config['image'], crop_mask)
-    all_stars = pd.concat([celObjects['stars'],])# celObjects['planets']])
+    celObjects = update_star_position(const_celestialObjects, observer, config, crop_mask)
+    stars = pd.concat([celObjects['stars'],])# celObjects['planets']])
 
 
     # calculate response of stars
     if args['--kernel']:
         kernelSize = np.arange(1, int(args['--kernel'])+1, 5)
+        stars_orig = stars.copy()
     else:
-        kernelSize = [float(config['image']['kernelsize'])]
+        kernelSize = [float(config['analysis']['kernelsize'])]
     kernelResults = list()
 
     for k in kernelSize:
         log.debug('Apply image filters. Kernelsize = {}'.format(k))
 
-        # work on a copy if this is a loop
-        if args['--kernel']:
-            stars = all_stars.copy()
-        else:
-            stars = all_stars
-         
+        # undo all changes, if we are in a loop
+        if len(kernelSize) > 1:
+            stars = stars_orig.copy()
+
         gauss = skimage.filters.gaussian(img, sigma=k)
 
         # chose the response function
@@ -882,7 +946,7 @@ def process_image(images, celestialObjects, config, args):
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
             stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
-        lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
+        lim = (split('\\s*,\\s*', config['analysis']['visibleupperlimit']), split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))
 
         # calculate visibility percentage
         # if response > visibleUpperLimit -> visible=1
@@ -903,21 +967,34 @@ def process_image(images, celestialObjects, config, args):
 
         # append results
         kernelResults.append(stars)
-
-
-
-    ##################################
     try:
-        df = pd.concat(kernelResults, keys=kernelSize)
+        del stars_orig
+    except UnboundLocalError:
+        pass
+
+    # merge all stars (if neccessary)
+    try:
+        stars = pd.concat(kernelResults, keys=kernelSize)
     except ValueError:
-        df = kernelResults[0]
+        stars = kernelResults[0]
+
+    if len(kernelSize) == 1:
+        points_of_interest = celObjects['points_of_interest']
+        points_of_interest['cloudiness'] = points_of_interest.apply(lambda p,stars=stars : calc_star_percentage(p, stars, 10, unit='deg', lim=-1, weight=True), axis=1)
+    else:
+        log.warning('Can not process points_of_interest if multiple kernel sizes get used')
+    
+
+    
+    
+    ##################################
 
     if args['--cam']:
         output['img'] = img
         fig = plt.figure()
         vmin = np.nanpercentile(img, 0.5)
         vmax = np.nanpercentile(img, 99.)
-        plt.imshow(img,vmin=vmin,vmax=vmax, cmap='gray')
+        plt.imshow(img, vmin=vmin,vmax=vmax, cmap='gray')
         stars.plot.scatter(x='x',y='y', ax=plt.gca(), c=stars.visible.values, cmap = plt.cm.RdYlGn, vmin=0, vmax=1, grid=True)
         plt.colorbar()
 
@@ -935,7 +1012,7 @@ def process_image(images, celestialObjects, config, args):
 
             # draw visibility limits
             x = np.linspace(-5+stars.vmag.min(), stars.vmag.max()+5, 20)
-            lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
+            lim = (split('\\s*,\\s*', config['analysis']['visibleupperlimit']), split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))
             y1 = 10**(x*float(lim[1][0]) + float(lim[1][1]))
             y2 = 10**(x*float(lim[0][0]) + float(lim[0][1]))
             ax.plot(x, y1, c='red', label='lower limit')

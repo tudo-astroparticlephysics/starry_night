@@ -2,14 +2,13 @@
 # coding: utf-8
 '''
 Usage:
-    starry_night -c <confFile> [<image>... | -d <directory> | -l <posFile>] [options]
+    starry_night -c <confFile> [<image>...] [options]
 
 Options:
                     If none
-    <image>         Image file(s)
-    <directory>     Directory that contains image files. (Recursive!)
-    <posFile>       File that contains Positions and timestamps to analyse
-    -t TIME         Force to use this time and do not parse image name
+    <image>         Image file(s) or folder(s)
+    -p <posFile>    File that contains Positions and timestamps to analyse
+    -t Time         Force to use this time and do not parse image name
     -c Camera       Provide a camera config file or use one of these names: 'GTC', 'Magic' or 'CTA'
     -v              Visual output
     -s              Save output to files
@@ -52,12 +51,15 @@ from scipy.optimize import curve_fit
 from re import split
 from collections import Counter
 from getpass import getpass
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
+
 
 from starry_night import skycam, cloud_tracker
 from IPython import embed
 
-def wrapper(config, celestialObjects, args, img):
-    return skycam.process_image(skycam.getImageDict(img, config), celestialObjects, config, args)
+def wrapper(const_celestialObjects, config, args, img):
+    return skycam.process_image(skycam.getImageDict(img, config), const_celestialObjects, config, args)
 
 __version__ = pkg_resources.require('starry_night')[0].version
 directory = os.path.join(os.environ['HOME'], '.starry_night')
@@ -102,22 +104,44 @@ def main(args):
 
     config = configparser.RawConfigParser()
     log.debug('Parsing config file: {}'.format(args['-c']))
-    # c!=0 if config was read successfully
+    # configfile can be a filepath or a name of a predefined config file
     if '.' in args['-c'] or '/' in args['-c']:
-        c = len(config.read(args['-c']))
+        conf_succ = len(config.read(args['-c']))
     else:
-        c = len(config.read(pkg_resources.resource_filename(
+        conf_succ = len(config.read(pkg_resources.resource_filename(
             'starry_night', 'data/{}_cam.config'.format(args['-c']))
         ))
-    if c == 0:
+    # conf_succ != 0 if config was read successfully
+    if conf_succ == 0:
         log.error('Unable to parse config file. Does the file exist?')
         sys.exit(1)
+    del conf_succ
 
+    # prepare everything for sql connection
     if args['--sql']:
         log.info('Storing results in SQL Database.\nConnection: {}\nPlease enter password'.format(config['SQL']['connection']))
         config['SQL']['connection'] = config['SQL']['connection'].format(getpass())
+        try:
+            engine = create_engine(config['SQL']['connection'])
+            if not engine.execute('SELECT VERSION();'):
+                log.error('SQL connection failed! Aborting')
+                sys.exit(1)
+            del engine
+        except OperationalError as e:
+            log.error(e)
+            sys.exit(1)
+
+    # read positioning file if any
+    if args['-p']:
+        try:
+            posFile = pd.read_hdf(args['-p'])[['MJD','Az','Zd']]
+        except Exception as e:
+            print(e)
+
+
+
     log.debug('Parsing Catalogue')
-    celestialObjects = skycam.star_planets_sun_moon_dict()
+    const_celestialObjects = skycam.celObjects_dict(config)
 
     log.debug('Aquire Image(s)')
     results = list()
@@ -149,11 +173,22 @@ def main(args):
                 print(images['timestamp'])
 
             results.append(
-                    skycam.process_image(images, celestialObjects, config, args)
+                    skycam.process_image(images, const_celestialObjects, config, args)
             )
 
     else:
-        # use image(s) provided by the user
+        # use image(s) provided by the user and search for directories
+        i = 0
+        maxLen = len(args['<image>']) 
+        while maxLen > i:
+            if os.path.isdir(args['<image>'][i]):
+                _dir = args['<image>'].pop(i)
+                for root, dirs, files in os.walk(_dir):
+                    for f in files:
+                        args['<image>'].append(os.path.join(root,f))
+            i += 1
+
+        # no multiprocessing if only a single image was found
         if len(args['<image>']) == 1:
             singleMode = True
             if args['-t'] is not None:
@@ -163,9 +198,10 @@ def main(args):
         imgCount = len(args['<image>'])
 
         log.info('Processing {} images.'.format(imgCount))
-        par = partial(wrapper, config, celestialObjects, args)
+        par = partial(wrapper, const_celestialObjects, config, args)
 
         # don't use multiprocessing in debug mode
+        # process all images and store results
         if args['--debug']:
             for img in args['<image>']:
                 results.append(par(img))
@@ -332,11 +368,11 @@ def main(args):
         return 10**(m*x+b)
 
     sys.exit(0)
-    fit_stars = df.query('0 < vmag < {}'.format(float(config['image']['vmaglimit'])))
+    fit_stars = df.query('0 < vmag < {}'.format(float(config['analysis']['vmaglimit'])))
     popt, pcov = curve_fit(logf, fit_stars.vmag.values, fit_stars.response.values, sigma=1/fit_stars.vmag.values, p0=(-0.2, 2))
     x = np.linspace(-3+fit_stars.vmag.min(), fit_stars.vmag.max(), 20)
     y = logf(x, popt[0], popt[1]-0.3)
-    lim = (split('\\s*,\\s*', config['image']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
+    lim = (split('\\s*,\\s*', config['analysis']['visibleupperlimit']), split('\\s*,\\s*', config['image']['visiblelowerlimit']))
     y1 = 10**(x*float(lim[1][0]) + float(lim[1][1]))
     y2 = 10**(x*float(lim[0][0]) + float(lim[0][1]))
     '''
@@ -366,7 +402,10 @@ if __name__ == '__main__':
         )
     try:
         main(args)
-    except (KeyboardInterrupt, SystemExit):
-        logging.getLogger().info('Exit')
+    except (KeyboardInterrupt, SystemExit) as e:
+        if len(e.args) > 0:
+            logging.getLogger('starry_night').info('Shutdown due to error!')
+        else:
+            logging.getLogger('starry_night').info('Exit')
     except:
         raise
