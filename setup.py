@@ -25,7 +25,7 @@ setup(
     ],
     test_suite='nose.collector',
     tests_require=['nose'],
-    scripts=['scripts/starry_night'],
+    scripts=['scripts/starry_night', 'scripts/configure'],
 
     package_data={
         'starry_night': [

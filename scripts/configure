@@ -3,23 +3,31 @@
 
 '''
 Usage:
-    configure
+    configure -c <confFile> [<image>...] [options]
 
 Options:
     What do you want to configure?
     -s              Star catalogue
-    -c              Camera config file
+    -c <confFile>   Camera config file
+    --crop          Configurate crop positions
+    --visLimits     Configure visibility limits
 
     --version       Show version.
     --debug         debug it [default: False]
 '''
-
 import pkg_resources
 import logging
 
 from docopt import docopt
+import numpy as np
+import pandas as pd
+import os
+import time
+import sys
 import configparser
 from starry_night import skycam
+from re import split
+import matplotlib.pyplot as plt
 from IPython import embed
 
 
@@ -63,11 +71,72 @@ def main(args):
         log.setLevel(logging.DEBUG)
         log.debug('started starry_night in debug mode')
 
+    if not args['<image>']:
+        log.error('No images were passed as args. Aborting')
+        sys.exit(1)
+
+    config = configparser.RawConfigParser()
+    log.debug('Parsing config file: {}'.format(args['-c']))
+    # configfile can be a filepath or a name of a predefined config file
+    if '.' in args['-c'] or '/' in args['-c']:
+        conf_succ = len(config.read(args['-c']))
+    else:
+        conf_succ = len(config.read(pkg_resources.resource_filename(
+            'starry_night', 'data/{}_cam.config'.format(args['-c']))
+        ))
+    # conf_succ != 0 if config was read successfully
+    if conf_succ == 0:
+        log.error('Unable to parse config file. Does the file exist?')
+        sys.exit(1)
+    del conf_succ
+
+
+    if args['--crop']:
+        imgDict = skycam.getImageDict(args['<image>'][0], config)
+        x = list(map(int, split('\\s*,\\s*', config['crop']['crop_x'])))
+        y = list(map(int, split('\\s*,\\s*', config['crop']['crop_y'])))
+        r = list(map(int, split('\\s*,\\s*', config['crop']['crop_radius'])))
+        inside = list(map(int, split('\\s*,\\s*', config['crop']['crop_deleteinside'])))
+        while True:
+            df_cr = pd.DataFrame({'x':x, 'y':y, 'r':r, 'inside':inside})
+            #config['crop']['crop_x'] = 0
+            print('Current cropping configuration:')
+            print(df_cr)
+            img = imgDict['img'].copy()
+            img_inv = imgDict['img'].copy()
+            crop_mask = skycam.get_crop_mask(img, config['crop'])
+            img[crop_mask] = 0
+            img_inv[~crop_mask] = 0
+            fig = plt.figure()
+            ax1 = fig.add_subplot(121)
+            ax1.imshow(img, cmap='gray')
+            ax1.grid()
+            ax1.set_title('Cropped Image - It looks like this')
+            ax2 = fig.add_subplot(122)
+            ax2.imshow(img_inv, cmap='gray')
+            ax2.grid()
+            ax2.set_title('Inverted - As double check')
+            plt.show()
+
+            print('You can change the cropping by setting new values\nfor x,y,r [float]and inside [boolean] like this: x[0]=42\n\n\n')
+            embed()
+            config['crop']['crop_x'] = str(x).replace('[','').replace(']','')
+            config['crop']['crop_y'] = str(y).replace('[','').replace(']','')
+            config['crop']['crop_radius'] = str(r).replace('[','').replace(']','')
+            config['crop']['crop_deleteinside'] = str(inside).replace('[','').replace(']','')
+            
+
+    if args['--visLimits']:
+        if len(args['<image>']) != 2:
+            log.error('Abort. You need to provide 2 images. First image without clouds, second image fully covered sky.')
+            sys.exit(1)
+        imgDict1 = skycam.getImageDict(args['<image>'][0], config)
+        imgDict2 = skycam.getImageDict(args['<image>'][1], config)
+
+
 
     if args['-s']:
         log.info('Configure new star catalogue')
-        
-        
         fail = True
         while fail:
             catalogue = resource_filename('starry_night', '../data/asu.tsv')
