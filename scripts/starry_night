@@ -52,7 +52,9 @@ from re import split
 from collections import Counter
 from getpass import getpass
 from sqlalchemy import create_engine
+
 from sqlalchemy.exc import OperationalError
+from tables import HDF5ExtError
 
 
 from starry_night import skycam, cloud_tracker
@@ -131,17 +133,17 @@ def main(args):
             log.error(e)
             sys.exit(1)
 
-    # read positioning file if any
-    if args['-p']:
-        try:
-            posFile = pd.read_hdf(args['-p'])[['MJD','Az','Zd']]
-        except Exception as e:
-            print(e)
-
-
 
     log.debug('Parsing Catalogue')
-    const_celestialObjects = skycam.celObjects_dict(config)
+    data = skycam.celObjects_dict(config)
+
+    # read positioning file if any
+    if args['-p']:
+        log.info('Parsing positioning file. This might take a while')
+        try:
+            data['positioning_file'] = pd.read_hdf(args['-p'], key='table')[['MJD','ra','dec']]
+        except (IOError, HDF5ExtError) as e:
+            log.error(e.args[0])
 
     log.debug('Aquire Image(s)')
     results = list()
@@ -173,7 +175,7 @@ def main(args):
                 print(images['timestamp'])
 
             results.append(
-                    skycam.process_image(images, const_celestialObjects, config, args)
+                    skycam.process_image(images, data, config, args)
             )
 
     else:
@@ -198,7 +200,7 @@ def main(args):
         imgCount = len(args['<image>'])
 
         log.info('Processing {} images.'.format(imgCount))
-        par = partial(wrapper, const_celestialObjects, config, args)
+        par = partial(wrapper, data, config, args)
 
         # don't use multiprocessing in debug mode
         # process all images and store results
