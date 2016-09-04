@@ -544,6 +544,8 @@ def update_star_position(data, observer, conf, crop, args):
     sunData['x'], sunData['y'] = horizontal2image(sunData['azimuth'], sunData['altitude'], cam=conf['image'])
 
     # remove stars and planets that are withing cropping area
+    res = list(map(int, split('\\s*,\\s*', conf['image']['resolution'])))
+    stars.query('0 < x < {} & 0 < y < {}'.format(res[0] ,res[1]), inplace=True)
     stars = stars[stars.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
     planets = planets[planets.apply(lambda p, crop=crop: ~crop[int(p['y']), int(p['x'])], axis=1)]
     points_of_interest = points_of_interest[points_of_interest.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
@@ -666,25 +668,26 @@ def get_crop_mask(img, crop):
     crop is dictionary with cropping information
     returns a boolean array in size of img: False got cropped; True not cropped 
     '''
-    if crop is not None:
-        try:
-            x = split('\\s*,\\s*', crop['crop_x'])
-            y = split('\\s*,\\s*', crop['crop_y'])
-            r = split('\\s*,\\s*', crop['crop_radius'])
-            inside = split('\\s*,\\s*', crop['crop_deleteinside'])
-            nrows,ncols = img.shape
-            row, col = np.ogrid[:nrows, :ncols]
-            disk_mask = np.full((nrows, ncols), False, dtype=bool)
-            for x,y,r,inside in zip(x,y,r,inside):
-                if inside == '0':
-                    disk_mask = disk_mask | ((row - int(y))**2 + (col - int(x))**2 > int(r)**2)
-                else:
-                    disk_mask = disk_mask | ((row - int(y))**2 + (col - int(x))**2 < int(r)**2)
-        except ValueError:
-            log = logging.getLogger(__name__)
-            log.error('Cropping failed, maybe there is a typing error in the config file?')
-            raise
-        return disk_mask
+    nrows, ncols = img.shape
+    row, col = np.ogrid[:nrows, :ncols]
+    disk_mask = np.full((nrows, ncols), False, dtype=bool)
+
+    try:
+        x = list(map(int, split('\\s*,\\s*', crop['crop_x'])))
+        y = list(map(int, split('\\s*,\\s*', crop['crop_y'])))
+        r = list(map(int, split('\\s*,\\s*', crop['crop_radius'])))
+        inside = list(map(int, split('\\s*,\\s*', crop['crop_deleteinside'])))
+        for x,y,r,inside in zip(x,y,r,inside):
+            if inside == 0:
+                disk_mask = disk_mask | ((row - y)**2 + (col - x)**2 > r**2)
+            else:
+                disk_mask = disk_mask | ((row - y)**2 + (col - x)**2 < r**2)
+    except ValueError:
+        log = logging.getLogger(__name__)
+        log.error('Cropping failed, maybe there is a typing error in the config file?')
+        disk_mask = np.full((nrows, ncols), False, dtype=bool)
+
+    return disk_mask
 
 
 def loadImageTime(filename):
@@ -747,6 +750,7 @@ def isInRange(position, stars, rng, unit='deg'):
                 az1 = position['azimuth']
                 deltaDeg = 2*np.arcsin(np.sqrt(np.sin((az1-stars.azimuth)/2)**2 + np.cos(az1)*np.cos(stars.azimuth)*np.sin((alt1-stars.altitude)/2)**2))
             except AttributeError as e:
+                log = logging.getLogger(__name__)
                 log.error('Degree value needed but object has no ra/dec an no alt/az attribute. {}'.format(e))
 
                 sys.exit(1)
@@ -897,8 +901,10 @@ def process_image(images, data, config, args):
     # update celestial objects (ignore planets, because they are bigger than stars and mess up the detection)
     celObjects = update_star_position(data, observer, config, crop_mask, args)
     stars = pd.concat([celObjects['stars'],])# celObjects['planets']])
-
-
+    if stars.empty:
+        log.error('No stars in DataFrame. Maybe all got removed by cropping? No analysis possible.')
+        return
+    
     # calculate response of stars
     if args['--kernel']:
         kernelSize = np.arange(1, int(args['--kernel'])+1, 5)
@@ -913,6 +919,7 @@ def process_image(images, data, config, args):
         # undo all changes, if we are in a loop
         if len(kernelSize) > 1:
             stars = stars_orig.copy()
+        stars['kernel'] = k
 
         gauss = skimage.filters.gaussian(img, sigma=k)
 
@@ -946,7 +953,7 @@ def process_image(images, data, config, args):
         # tolerance is max distance between actual star position and expected star position
         # this should be a little smaller than 1° because this is the minimum distance
         # between 2 catalogue stars (catalogue was filtered for this)
-        tolerance = int((float(config['image']['radius'])/90-1)/2)-3 
+        tolerance = np.max([0, int((float(config['image']['radius'])/90-1)/2)])
         log.debug('Calculate Filter response')
         
         # calculate x and y position where response has its max value (search within 'tolerance' range)
@@ -1002,15 +1009,17 @@ def process_image(images, data, config, args):
         celObjects['stars'] = pd.concat(kernelResults, keys=kernelSize)
     except ValueError:
         celObjects['stars'] = kernelResults[0]
+
     # use 'stars' as substitution because it is shorter
+    celObjects['stars'].reset_index(0, drop=True, inplace=True)
     stars = celObjects['stars']
 
     if len(kernelSize) == 1:
-        celObjects['points_of_interest']['cloudiness'] = celObjects['points_of_interest'].apply(lambda p,stars=stars : calc_star_percentage(p, stars, p.radius, unit='deg', lim=-1, weight=True), axis=1)
+        celObjects['points_of_interest']['cloudiness'] = celObjects['points_of_interest'].apply(
+                lambda p,stars=stars : calc_star_percentage(p, stars, p.radius, unit='deg', lim=-1, weight=True),
+                axis=1)
     else:
         log.warning('Can not process points_of_interest if multiple kernel sizes get used')
-    
-
     
     
     ##################################
@@ -1039,9 +1048,9 @@ def process_image(images, data, config, args):
 
             # draw visibility limits
             x = np.linspace(-5+stars.vmag.min(), stars.vmag.max()+5, 20)
-            lim = (split('\\s*,\\s*', config['analysis']['visibleupperlimit']), split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))
-            y1 = 10**(x*float(lim[1][0]) + float(lim[1][1]))
-            y2 = 10**(x*float(lim[0][0]) + float(lim[0][1]))
+            lim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
+            y1 = 10**(x*lim[1][0] + lim[1][1])
+            y2 = 10**(x*lim[0][0] + lim[0][1])
             ax.plot(x, y1, c='red', label='lower limit')
             ax.plot(x, y2, c='green', label='upper limit')
 
@@ -1049,7 +1058,7 @@ def process_image(images, data, config, args):
             ax.set_xlim((-1, max(stars['vmag'])+0.5))
             #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response.values,10.0))//1-1),
             #    top=10**(np.log10(np.nanpercentile(stars.response.values,99.9))//1+1))
-            ax.set_ylim((1e-1,1e3))
+            #ax.set_ylim((1e-1,1e3))
             ax.set_ylabel('Kernel Response')
             ax.set_xlabel('Star Magnitude')
             if args['-c'] == 'GTC':
@@ -1170,8 +1179,14 @@ def process_image(images, data, config, args):
     output['stars'] = stars
 
     if args['--sql'] or args['--low-memory']:
-        slimOutput = pd.DataFrame()
-        for key in ['timestamp', 'hash', 'bla']:
+        slimOutput = dict()
+        for key in ['timestamp', 'hash']:
+            try:
+                slimOutput[key] = [output[key]]
+            except KeyError:
+                pass
+        embed()
+        for key in ['timestamp', 'hash']:
             try:
                 slimOutput[key] = [output[key]]
             except KeyError:
@@ -1180,7 +1195,7 @@ def process_image(images, data, config, args):
         if args['--sql']:
             try:
                 connection = create_engine(config['SQL']['connection'])
-                slimOutput.to_sql(config['SQL']['table'], con=connection, if_exists='append', index=False)
+                pd.DataFrame(slimOutput).to_sql(config['SQL']['table'], con=connection, if_exists='append', index=False)
             except (OperationalError):
                 log.error('Writing to SQL server failed. Server up? Password correct?')
             except InternalError as e:

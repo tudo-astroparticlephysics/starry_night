@@ -229,6 +229,10 @@ def main(args):
     if len(results) == 0:
         sys.exit(0)
 
+    if args['--low-memory']:
+        log.info('Option \'low-memory\'activated. No more processing')
+        embed()
+        sys.exit(0)
     star_list = list(map(lambda x: x['stars'], results))
     timestamp_list = list(map(lambda x: x['timestamp'], results))
     if args['--cloudtrack']:
@@ -269,7 +273,8 @@ def main(args):
 
             grouped = df.groupby('HIP')
             #remove stars that do not have a wide enough span of their altitude for plotting
-            plot_df = grouped.filter(lambda x: x.altitude.max() > 80*np.pi/180 and x.altitude.min() < 15*np.pi/180)
+            plot_df = grouped.filter(lambda x: x.altitude.max() > np.percentile(df.altitude, 95) and x.altitude.min() < np.percentile(df.altitude, 5))
+
             for i, vmag in enumerate(vmag_to_plot):
                 c = color[i]
                 # get star with magnitude closest to 'vmag'
