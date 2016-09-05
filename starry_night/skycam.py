@@ -98,8 +98,7 @@ def downloadImg(url, *args, **kwargs):
                 pass
     elif url.split('.')[-1] == 'FIT':
         hdulist = fits.open(BytesIO(ret.content), ignore_missing_end=True)
-        # transpose because fits file is flipped for some reason
-        imgList.append(hdulist[0].data.T)
+        imgList.append(hdulist[0].data)
         timeList.append(
                 datetime.strptime(
                     hdulist[0].header['UTC'],
@@ -402,6 +401,8 @@ def celObjects_dict(config):
     points_of_interest['altitude'] = np.NaN
     points_of_interest['azimuth'] = np.NaN
     points_of_interest['radius'] = float(config['analysis']['poi_radius'])
+    points_of_interest['ra'] *= np.pi/180 
+    points_of_interest['dec'] *= np.pi/180
 
     # add moon
     moonData = {
@@ -762,13 +763,14 @@ def isInRange(position, stars, rng, unit='deg'):
 
 def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
     '''
-    Returns: percentage of visible stars that are within range of position
+    Returns: percentage of stars within range of position that are visible 
              and -1 if no stars in range
     
     Position is dictionary and can contain Ra,Dec and/or x,y
     Range is degree or pixel radius depending on whether unit is 'grad' or 'pixel'
     Lim is limit visibility that separates visible stars from not visible. [0.0 - 1.0]. If
     lim < 0 then all stars in range will be used and 'visible' is a weight factor
+    Weight = True: each star is multiplied by weight [100**(1/5)]**-magnitude -> bright stars have more impact
     '''
 
     if rng < 0:
@@ -776,25 +778,23 @@ def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
     else:
         starsInRange = stars[isInRange(position, stars, rng, unit)]
 
-    try:
-        if lim >= 0:
-            if weight:
-                vis = np.sum(np.power(100**(1/5), -starsInRange.query('visible >= {}'.format(lim)).vmag.values))
-                notVis = np.sum(np.power(100**(1/5), -starsInRange.query('visible < {}'.format(lim)).vmag.values))
-                percentage = vis/(vis+notVis)
-            else:
-                percentage = len(starsInRange.query('visible >= {}'.format(lim)).index)/len(starsInRange.index)
-        else:
-            if weight:
-                percentage = np.sum(starsInRange.visible.values * np.power(100**(1/5),-starsInRange.vmag.values)) / \
-                    np.sum(np.power(100**(1/5),-starsInRange.vmag.values))
-            else:
-                percentage = np.mean(starsInRange.visible.values)
+    if starsInRange.empty:
+        return -1
 
-    except ZeroDivisionError:
-        #log = logging.getLogger(__name__)
-        #log.warning('No stars in range to calc percentage. Returning -1.')
-        percentage = -1
+    if lim >= 0:
+        if weight:
+            vis = np.sum(np.power(100**(1/5), -starsInRange.query('visible >= {}'.format(lim)).vmag.values))
+            notVis = np.sum(np.power(100**(1/5), -starsInRange.query('visible < {}'.format(lim)).vmag.values))
+            percentage = vis/(vis+notVis)
+        else:
+            percentage = len(starsInRange.query('visible >= {}'.format(lim)).index)/len(starsInRange.index)
+    else:
+        if weight:
+            percentage = np.sum(starsInRange.visible.values * np.power(100**(1/5),-starsInRange.vmag.values)) / \
+                np.sum(np.power(100**(1/5),-starsInRange.vmag.values))
+        else:
+            percentage = np.mean(starsInRange.visible.values)
+
 
     return percentage
 
@@ -1015,7 +1015,7 @@ def process_image(images, data, config, args):
     stars = celObjects['stars']
 
     if len(kernelSize) == 1:
-        celObjects['points_of_interest']['cloudiness'] = celObjects['points_of_interest'].apply(
+        celObjects['points_of_interest']['star_percentage'] = celObjects['points_of_interest'].apply(
                 lambda p,stars=stars : calc_star_percentage(p, stars, p.radius, unit='deg', lim=-1, weight=True),
                 axis=1)
     else:
@@ -1177,6 +1177,7 @@ def process_image(images, data, config, args):
 
     del images
     output['stars'] = stars
+    output['points_of_interest'] = celObjects['points_of_interest']
 
     if args['--sql'] or args['--low-memory']:
         slimOutput = dict()
@@ -1185,7 +1186,6 @@ def process_image(images, data, config, args):
                 slimOutput[key] = [output[key]]
             except KeyError:
                 pass
-        embed()
         for key in ['timestamp', 'hash']:
             try:
                 slimOutput[key] = [output[key]]
