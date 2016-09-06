@@ -78,53 +78,64 @@ plt.legend(loc='lower right')
 plt.show()
 '''
 
+class TooEarlyError(Exception):
+    pass
 
-def downloadImg(url, *args, **kwargs):
-    logging.getLogger("requests").setLevel(logging.WARNING)
-    imgList = list()
-    timeList = list()
-    outList = list()
-    ret = requests.get(url)
-    if url.split('.')[-1] == 'mat':
-        data = matlab.loadmat(BytesIO(ret.content))
-        for d in list(data.values()):
-            try:
-                if d.shape[0] > 100 and d.shape[1] > 100:
-                    imgList.append(d)
-            except AttributeError:
-                pass
-            try:
-                timeList.append(datetime.strptime(d[0], '%Y/%m/%d %H:%M:%S'))
-            except (IndexError, TypeError, ValueError):
-                pass
-    elif url.split('.')[-1] == 'FIT':
-        hdulist = fits.open(BytesIO(ret.content), ignore_missing_end=True)
-        imgList.append(hdulist[0].data)
-        timeList.append(
-                datetime.strptime(
-                    hdulist[0].header['UTC'],
-                    '%Y/%m/%d %H:%M:%S'
-                )
-        )
-        
-    for img, t in zip(imgList,timeList):
-        outList.append(dict({
-            'img' : img,
-            'timestamp' : t,
-            })
-        )
-
-        return outList
-    return [rgb2gray(imread(url, ))]
-
-
-def get_last_modified(url, *args, **kwargs):
-    ret = requests.head(url, *args, **kwargs)
+def get_last_modified(url, timeout):
+    ret = requests.head(url, timeout=timeout)
     date = datetime.strptime(
         ret.headers['Last-Modified'],
         '%a, %d %b %Y %H:%M:%S GMT'
     )
     return date
+
+
+def downloadImg(url, timeout=None):
+    if not hasattr(downloadImg, 'lastMod'):
+        downloadImg.lastMod = datetime(1,1,1)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+
+    # only download if time since last image is > than wait
+    mod = get_last_modified(url, timeout=timeout)
+    if downloadImg.lastMod == mod:
+        raise TooEarlyError()
+    else:
+        downloadImg.lastMod = mod
+
+    # download image data
+    ret = requests.get(url, timeout=timeout)
+    if url.split('.')[-1] == 'mat':
+        data = matlab.loadmat(BytesIO(ret.content))
+        for d in list(data.values()):
+            # loop through all keys and treat the first array with size > 100x100 as image
+            # that way the name of the key does not matter
+            try:
+                if d.shape[0] > 100 and d.shape[1] > 100:
+                    img = d
+            except AttributeError:
+                pass
+            try:
+                timestamp = datetime.strptime(d[0], '%Y/%m/%d %H:%M:%S')
+            except (IndexError, TypeError, ValueError):
+                pass
+    elif url.split('.')[-1] == 'FIT':
+        hdulist = fits.open(BytesIO(ret.content), ignore_missing_end=True)
+        img = hdulist[0].data
+        timestamp = datetime.strptime(
+                        hdulist[0].header['UTC'],
+                        '%Y/%m/%d %H:%M:%S')
+
+        return outList
+    else:
+        img = rgb2gray(imread(url, ))
+        timestamp = get_last_modified(url, timeout=timeout)
+        
+    return {
+        'img' : img,
+        'timestamp' : timestamp,
+        }
+
+
 
 
 def getBlobsize(img, thresh, limit=0):
@@ -548,6 +559,8 @@ def update_star_position(data, observer, conf, crop, args):
     # remove stars and planets that are withing cropping area
     res = list(map(int, split('\\s*,\\s*', conf['image']['resolution'])))
     stars.query('0 < x < {} & 0 < y < {}'.format(res[0] ,res[1]), inplace=True)
+    planets.query('0 < x < {} & 0 < y < {}'.format(res[0] ,res[1]), inplace=True)
+    points_of_interest.query('0 < x < {} & 0 < y < {}'.format(res[0] ,res[1]), inplace=True)
     stars = stars[stars.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
     planets = planets[planets.apply(lambda p, crop=crop: ~crop[int(p['y']), int(p['x'])], axis=1)]
     points_of_interest = points_of_interest[points_of_interest.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
@@ -646,9 +659,9 @@ def getImageDict(filepath, config, crop=None, fmt=None):
         # read normal image file
         try:
             img = imread(filepath, mode='L', as_grey=True)
-        except (FileNotFoundError, OSError):
-            log.error('File \'{}\' not found. Or filetype invalid'.format(filename))
-            sys.exit(1)
+        except (FileNotFoundError, OSError, ValueError) as e:
+            log.error('Error reading file \'{}\': {}'.format(filename+'.'+filetype, e))
+            return
         try:
             if fmt is None:
                 time = datetime.strptime(filename, config['properties']['timeformat'])
@@ -869,6 +882,8 @@ def process_image(images, data, config, args):
     log = logging.getLogger(__name__)
 
     output = dict()
+    if not images:
+        return output
 
 
     log.info('Processing image taken at: {}'.format(images['timestamp']))
@@ -1065,9 +1080,7 @@ def process_image(images, data, config, args):
             if args['-c'] == 'GTC':
                 if args['--function'] == 'Grad':
                     ax.axhspan(ymin=11**2/255**2, ymax=13**2/255**2, color='red', alpha=0.5, label='old threshold range')
-                if args['--function'] == 'LoG':
-                    ax.axhline(0.015, color='red', label='Estimated threshold')
-                ax.axvline(4.5, color='green', label='Magnitude lower limit')
+                ax.axvline(4.5, color='black', label='Magnitude lower limit')
 
             # show camera image in a subplot
             ax_in= inset_axes(ax,
@@ -1077,6 +1090,7 @@ def process_image(images, data, config, args):
             vmin = np.nanpercentile(img, 0.5)
             vmax = np.nanpercentile(img, 99.)
             ax_in.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
+            stars.plot.scatter(x='x',y='y', ax=ax_in, c='visible', cmap='RdYlGn', vmin=0, vmax=1, grid=True)
             ax_in.get_xaxis().set_visible(False)
             ax_in.get_yaxis().set_visible(False)
             
@@ -1180,7 +1194,7 @@ def process_image(images, data, config, args):
     output['stars'] = stars
     output['points_of_interest'] = celObjects['points_of_interest']
 
-    if args['--sql'] or args['--low-memory']:
+    if args['--sql'] or args['--low-memory'] or args['--daemon']:
         slimOutput = dict()
         for key in ['timestamp', 'hash']:
             try:
@@ -1201,7 +1215,7 @@ def process_image(images, data, config, args):
                 log.error('Writing to SQL server failed. Server up? Password correct?')
             except InternalError as e:
                 log.error('Error while writing to SQL server: {}'.format(e))
-        if args['--low-memory']:
+        if args['--low-memory'] or args['--daemon']:
             del output
             output = slimOutput
             del slimOutput

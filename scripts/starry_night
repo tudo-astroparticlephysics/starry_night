@@ -3,6 +3,7 @@
 '''
 Usage:
     starry_night -c <confFile> [<image>...] [options]
+    starry_night -c <confFile> --daemon
 
 Options:
                     If none
@@ -26,7 +27,8 @@ Options:
     --sql           Store results in SQL database
     --low-memory    Don't store results of each image in memory for final processing. 
                     Use this option if you are not planning to merge the results because the 
-                    amount of files is too big or because you run this as a daemon at night. 
+                    amount of files is too big or because you run this as a daemon at night.
+    --daemon        Run as daemon during the night, no input possible.
     --version       Show version.
     --debug         debug it [default: False]
 '''
@@ -54,6 +56,7 @@ from getpass import getpass
 from sqlalchemy import create_engine
 
 from sqlalchemy.exc import OperationalError
+from requests.exceptions import Timeout
 from tables import HDF5ExtError
 
 
@@ -147,36 +150,30 @@ def main(args):
 
     log.debug('Aquire Image(s)')
     results = list()
+
     if not args['<image>']:
-        # download current image(s) from URL
-        singleMode = True
-        log.info('Downloading image from {}'.format(config['properties']['url']))
-        try:
-            rawImg = skycam.downloadImg(
-                config['properties']['url'],
-                timeout=5,
-            )
-            log.debug('Download finished')
-        except:
-            log.error('Download of image failed')
-            raise
-
-        for img in rawImg:
-            if type(img) is not dict:
-                images = dict({
-                        'img': img,
-                        'timestamp': datetime.utcnow() +
-                        timedelta(minutes=float(config['properties']['timeoffset']))
-                })
-            else:
-                images = img
-                print(images['timestamp'])
-                images['timestamp'] += timedelta(minutes=float(config['properties']['timeoffset']))
-                print(images['timestamp'])
-
-            results.append(
-                    skycam.process_image(images, data, config, args)
-            )
+        # download image(s) from URL
+        lastDownload = lastDownload=datetime(1,1,1)
+        while 1:
+            log.info('Downloading image from {}'.format(config['properties']['url']))
+            try:
+                img = skycam.downloadImg(
+                    config['properties']['url'],
+                    timeout=5,
+                )
+                lastDownload = datetime.utcnow()
+                log.debug('Download finished')
+            except skycam.TooEarlyError as e:
+                log.info('No new image available. Try again in 30 s.')
+                time.sleep(30)
+                continue
+            except Timeout as e:
+                log.error('Download of image failed. Try again in 30 s. {}'.format(e))
+                time.sleep(30)
+                continue
+                
+            img['timestamp'] += timedelta(minutes=float(config['properties']['timeoffset']))
+            skycam.process_image(img, data, config, args)
 
     else:
         # use image(s) provided by the user and search for directories
@@ -192,11 +189,8 @@ def main(args):
 
         # no multiprocessing if only a single image was found
         if len(args['<image>']) == 1:
-            singleMode = True
             if args['-t'] is not None:
                 images['timestamp'] = datetime(args['-t'])
-        else:
-            singleMode = False
         imgCount = len(args['<image>'])
 
         log.info('Processing {} images.'.format(imgCount))
@@ -226,7 +220,7 @@ def main(args):
     log.info('{} images were processed successfully.'.format(imgCount))
 
     # no more processing if no images were processed successfully
-    if len(results) == 0:
+    if len(results) <= 1:
         sys.exit(0)
 
     if args['--low-memory']:
@@ -343,15 +337,19 @@ def main(args):
     if args['--response']:
         fig = plt.figure(figsize=(16,9))
         ax = plt.subplot(111)
+        ax.semilogy()
         ax.axhspan(ymin=11**2/255**2, ymax=13**2/255**2, color='red', alpha=0.5, label='Old threshold - Gradient')
         mean.plot.scatter(x='vmag',y='response', yerr=std['response'].values, color='blue', ax=ax, logy=True, grid=True, vmin=0, vmax=1, label='{} Response'.format(args['--function']))
         #mean.plot.scatter(x='vmag',y='response_grad', yerr=std['response_grad'].values, color='red', ax=ax, logy=True, grid=True, label='Gradient Response')
         #ax.set_xlim((-1, max(mean['vmag'])+0.5))
         ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(mean.response.values,10.0))//1-1),
             top=10**(np.log10(np.nanpercentile(mean.response.values,99.9))//1+1))
-        ax.plot(x,y)
-        ax.plot(x,y1)
-        ax.plot(x,y2)
+        x = np.linspace(-5+mean.vmag.min(), mean.vmag.max()+5, 20)
+        lim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
+        y1 = 10**(x*lim[1][0] + lim[1][1])
+        y2 = 10**(x*lim[0][0] + lim[0][1])
+        ax.plot(x, y1, c='red', label='lower limit')
+        ax.plot(x, y2, c='green', label='upper limit')
         ax.legend(loc='best')
         ax.set_ylabel('Kernel Response')
         ax.set_xlabel('Star Magnitude')
