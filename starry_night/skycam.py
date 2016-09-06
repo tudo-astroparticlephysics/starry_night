@@ -80,6 +80,7 @@ plt.show()
 
 
 def downloadImg(url, *args, **kwargs):
+    logging.getLogger("requests").setLevel(logging.WARNING)
     imgList = list()
     timeList = list()
     outList = list()
