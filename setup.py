@@ -34,6 +34,7 @@ setup(
             'data/GTC_cam.config',
             'data/IceCube_cam.config',
             'data/Magic_cam.config',
+            'data/example_sources.csv',
             ]
         },
     zip_safe=False
