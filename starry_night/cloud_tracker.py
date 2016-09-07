@@ -21,7 +21,7 @@ class Cloud:
                     self.direction,
                     self.covered,
                     )
-                )
+        )
 
 class CloudTracker:
     def __init__(self):

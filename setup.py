@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='starry_night',
-    version='1.0.0',
+    version='1.0',
     description='A tool for calculating the cloudiness of the night sky based on star detection',
     url='https://bitbucket.org/solarer/starry_night',
     author='Jan Adam',

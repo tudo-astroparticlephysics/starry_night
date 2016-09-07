@@ -173,6 +173,8 @@ def main(args):
                 
             #img['timestamp'] += timedelta(minutes=float(config['properties']['timeoffset']))
             skycam.process_image(img, data, config, args)
+            if not args['--daemon']:
+                break
 
     else:
         # use image(s) provided by the user and search for directories
