@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import rc, cm
 from mpl_toolkits.axes_grid.inset_locator import inset_axes
 
 import ephem
@@ -91,8 +92,18 @@ def get_last_modified(url, timeout):
 
 
 def downloadImg(url, timeout=None):
+    '''
+    Download image from URL and return a dict with 'img' and 'timestamp'
+
+    Download will only happen, if the website was updated since the last download AND the SHA1
+    hashsum differs from the previous image because sometime a website might refresh without
+    updating the image.
+    Works with fits, mat and all common image filetypes.
+    '''
+    log = logging.getLogger(__name__)
     if not hasattr(downloadImg, 'lastMod'):
         downloadImg.lastMod = datetime(1,1,1)
+        downloadImg.hash = ''
     logging.getLogger('requests').setLevel(logging.WARNING)
 
     # only download if time since last image is > than wait
@@ -102,8 +113,13 @@ def downloadImg(url, timeout=None):
     else:
         downloadImg.lastMod = mod
 
-    # download image data
+    # download image data and double check if this really is a new image
+    log.info('Downloading image from {}'.format(url))
     ret = requests.get(url, timeout=timeout)
+    if downloadImg.hash == sha1(ret.content).hexdigest():
+        raise TooEarlyError()
+    else:
+        downloadImg.hash = sha1(ret.content).hexdigest()
     if url.split('.')[-1] == 'mat':
         data = matlab.loadmat(BytesIO(ret.content))
         for d in list(data.values()):
@@ -120,12 +136,11 @@ def downloadImg(url, timeout=None):
                 pass
     elif url.split('.')[-1] == 'FIT':
         hdulist = fits.open(BytesIO(ret.content), ignore_missing_end=True)
-        img = hdulist[0].data
+        img = hdulist[0].data+2**16/2
         timestamp = datetime.strptime(
                         hdulist[0].header['UTC'],
                         '%Y/%m/%d %H:%M:%S')
 
-        return outList
     else:
         img = rgb2gray(imread(url, ))
         timestamp = get_last_modified(url, timeout=timeout)
@@ -134,7 +149,6 @@ def downloadImg(url, timeout=None):
         'img' : img,
         'timestamp' : timestamp,
         }
-
 
 
 
@@ -899,20 +913,22 @@ def process_image(images, data, config, args):
     sun.compute(observer)
     moon = ephem.Moon()
     moon.compute(observer)
-    if np.rad2deg(sun.alt) > -10:
-        log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
-        return output
-    elif np.rad2deg(moon.alt) > -10:
-        log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
-        return output
+    if not args['--daemon']:
+        if np.rad2deg(sun.alt) > -10:
+            log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
+            return output
+        elif np.rad2deg(moon.alt) > -10:
+            log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
+            return output
 
     # put timestamp and hash sum into output dict
     output['timestamp'] = images['timestamp']
     output['hash'] = sha1(images['img'].data).hexdigest()
 
     # create cropping array to mask unneccessary image regions.
+    crop_mask = get_crop_mask(images['img'], config['crop'])
+    images['img'][crop_mask] = np.NaN
     img = images['img']
-    crop_mask = get_crop_mask(img, config['crop'])
 
     # update celestial objects (ignore planets, because they are bigger than stars and mess up the detection)
     celObjects = update_star_position(data, observer, config, crop_mask, args)
@@ -944,9 +960,10 @@ def process_image(images, data, config, args):
             grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
             sobel = skimage.filters.sobel(img).clip(min=0)
             lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
-            grad[crop_mask] = 0
-            sobel[crop_mask] = 0
-            lap[crop_mask] = 0
+
+            grad[crop_mask] = np.NaN
+            sobel[crop_mask] = np.NaN
+            lap[crop_mask] = np.NaN
             images['grad'] = grad
             images['sobel'] = sobel
             images['lap'] = lap
@@ -962,7 +979,7 @@ def process_image(images, data, config, args):
         else:
             log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
             sys.exit(1)
-        resp[crop_mask] = 0
+        resp[crop_mask] = np.NaN
         images['response'] = resp
 
 
@@ -1040,41 +1057,43 @@ def process_image(images, data, config, args):
     
     ##################################
 
-    if args['--cam']:
+    if args['--cam'] or args['--daemon']:
         output['img'] = img
-        fig = plt.figure()
-        vmin = np.nanpercentile(img, 0.5)
+        fig = plt.figure(figsize=(16,9))
+        vmin = np.nanpercentile(img, 5)
         vmax = np.nanpercentile(img, 99.)
         plt.imshow(img, vmin=vmin,vmax=vmax, cmap='gray')
-        stars.plot.scatter(x='x',y='y', ax=plt.gca(), c='visible', cmap = plt.cm.RdYlGn, vmin=0, vmax=1, grid=True)
-        celObjects['points_of_interest'].plot.scatter(x='x', y='y', ax=plt.gca(), label='Sources')
+        stars.plot.scatter(x='x',y='y', ax=plt.gca(), c='visible', cmap = plt.cm.RdYlGn, s=30, vmin=0, vmax=1, grid=True)
+        celObjects['points_of_interest'].plot.scatter(x='x', y='y', ax=plt.gca(), s=80, color='white', marker='^', label='Sources')
         plt.colorbar()
+        plt.tight_layout()
 
         if args['-s']:
             plt.savefig('cam_image_{}.pdf'.format(images['timestamp'].isoformat()))
+        if args['--daemon']:
+            plt.savefig('cam_image_{}.png'.format(config['properties']['name']),dpi=300)
         if args['-v']:
             plt.show()
         plt.close('all')
 
-    if args['--single']:
-        if args['--response']:
+    if args['--single'] or args['--daemon']:
+        if args['--response'] or args['--daemon']:
             fig = plt.figure(figsize=(16,9))
             ax = plt.subplot(111)
             ax.semilogy()
 
             # draw visibility limits
             x = np.linspace(-5+stars.vmag.min(), stars.vmag.max()+5, 20)
-            lim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
+            lim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), 
+                    list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
             y1 = 10**(x*lim[1][0] + lim[1][1])
             y2 = 10**(x*lim[0][0] + lim[0][1])
             ax.plot(x, y1, c='red', label='lower limit')
             ax.plot(x, y2, c='green', label='upper limit')
 
-            stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values, cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
+            stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values,
+                    cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
             ax.set_xlim((-1, max(stars['vmag'])+0.5))
-            #ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(stars.response.values,10.0))//1-1),
-            #    top=10**(np.log10(np.nanpercentile(stars.response.values,99.9))//1+1))
-            #ax.set_ylim((1e-1,1e3))
             ax.set_ylabel('Kernel Response')
             ax.set_xlabel('Star Magnitude')
             if args['-c'] == 'GTC':
@@ -1090,13 +1109,16 @@ def process_image(images, data, config, args):
             vmin = np.nanpercentile(img, 0.5)
             vmax = np.nanpercentile(img, 99.)
             ax_in.imshow(img,cmap='gray',vmin=vmin,vmax=vmax)
-            stars.plot.scatter(x='x',y='y', ax=ax_in, c='visible', cmap='RdYlGn', vmin=0, vmax=1, grid=True)
+            color = cm.RdYlGn(stars.visible.values)
+            stars.plot.scatter(x='x',y='y', ax=ax_in, c=color, vmin=0, vmax=1, grid=True)
             ax_in.get_xaxis().set_visible(False)
             ax_in.get_yaxis().set_visible(False)
             
             ax.legend(loc='best')
             if args['-s']:
                 plt.savefig('response_{}_{}.pdf'.format(args['--function'], images['timestamp'].isoformat()))
+            if args['--daemon']:
+                plt.savefig('response_{}.png'.format(config['properties']['name']),dpi=200)
             if args['-v']:
                 plt.show()
             plt.close('all')
@@ -1168,7 +1190,7 @@ def process_image(images, data, config, args):
             del sobel
             del lap
 
-    if args['--cloudmap'] or args['--cloudtrack']:
+    if args['--cloudmap'] or args['--cloudtrack'] or args['--daemon']:
         log.debug('Calculating cloud map')
         cloud_map = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=True)
         cloud_map[crop_mask] = np.NaN
@@ -1189,14 +1211,23 @@ def process_image(images, data, config, args):
             if args['-v']:
                 plt.show()
             plt.close('all')
+        if args['--daemon']:
+            ax = plt.subplot(111)
+            ax.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
+            ax.grid()
+            plt.savefig('cloudMap_{}.png'.format(config['properties']['name']),dpi=200)
 
     del images
     output['stars'] = stars
     output['points_of_interest'] = celObjects['points_of_interest']
+    output['sun_alt'] = celObjects['sun']['altitude']
+    output['moon_alt'] = celObjects['moon']['altitude']
+    output['moon_phase'] = celObjects['moon']['moonPhase']
+
 
     if args['--sql'] or args['--low-memory'] or args['--daemon']:
         slimOutput = dict()
-        for key in ['timestamp', 'hash']:
+        for key in ['timestamp', 'hash','sun']:
             try:
                 slimOutput[key] = [output[key]]
             except KeyError:
@@ -1220,4 +1251,5 @@ def process_image(images, data, config, args):
             output = slimOutput
             del slimOutput
 
+    log.info('Done')
     return output
