@@ -422,8 +422,20 @@ def celObjects_dict(config):
             index_col=None,
         )
     except OSError as e:
-        log.error('File with points of interest not found: {}'.format(e))
-        sys.exit(1)
+        log.debug('File with points of interest not found: {} We will now check internal package files...'.format(e))
+        try:
+            poi_filename = resource_filename('starry_night', join('data',config['analysis']['points_of_interest']))
+            points_of_interest = pd.read_csv(
+                poi_filename,
+                sep=',',
+                comment='#',
+                header=0,
+                skipinitialspace=False,
+                index_col=None,
+            )
+        except OSError as e:
+            log.error('File with points of interest not found: {}'.format(e))
+            sys.exit(1)
     points_of_interest['altitude'] = np.NaN
     points_of_interest['azimuth'] = np.NaN
     points_of_interest['radius'] = float(config['analysis']['poi_radius'])
