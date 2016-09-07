@@ -153,15 +153,12 @@ def main(args):
 
     if not args['<image>']:
         # download image(s) from URL
-        lastDownload = lastDownload=datetime(1,1,1)
         while 1:
-            log.info('Downloading image from {}'.format(config['properties']['url']))
             try:
                 img = skycam.downloadImg(
                     config['properties']['url'],
                     timeout=5,
                 )
-                lastDownload = datetime.utcnow()
                 log.debug('Download finished')
             except skycam.TooEarlyError as e:
                 log.info('No new image available. Try again in 30 s.')
@@ -172,7 +169,7 @@ def main(args):
                 time.sleep(30)
                 continue
                 
-            img['timestamp'] += timedelta(minutes=float(config['properties']['timeoffset']))
+            #img['timestamp'] += timedelta(minutes=float(config['properties']['timeoffset']))
             skycam.process_image(img, data, config, args)
 
     else:
@@ -220,11 +217,12 @@ def main(args):
     log.info('{} images were processed successfully.'.format(imgCount))
 
     # no more processing if no images were processed successfully
-    if len(results) <= 1:
+    if len(results) <= 5:
+        log.info('Stop because only {} image(s) were processed. And we don\'t have enough data for further steps.'.format(len(results)))
         sys.exit(0)
 
     if args['--low-memory']:
-        log.info('Option \'low-memory\'activated. No more processing')
+        log.info('Option \'low-memory\' was activated. No data for further processing')
         embed()
         sys.exit(0)
     star_list = list(map(lambda x: x['stars'], results))
@@ -339,7 +337,8 @@ def main(args):
         ax = plt.subplot(111)
         ax.semilogy()
         ax.axhspan(ymin=11**2/255**2, ymax=13**2/255**2, color='red', alpha=0.5, label='Old threshold - Gradient')
-        mean.plot.scatter(x='vmag',y='response', yerr=std['response'].values, color='blue', ax=ax, logy=True, grid=True, vmin=0, vmax=1, label='{} Response'.format(args['--function']))
+        mean.plot.scatter(x='vmag',y='response', yerr=std['response'].values, color='blue',
+                ax=ax, logy=True, grid=True, vmin=0, vmax=1, label='{} Response'.format(args['--function']))
         #mean.plot.scatter(x='vmag',y='response_grad', yerr=std['response_grad'].values, color='red', ax=ax, logy=True, grid=True, label='Gradient Response')
         #ax.set_xlim((-1, max(mean['vmag'])+0.5))
         ax.set_ylim(bottom=10**(np.log10(np.nanpercentile(mean.response.values,10.0))//1-1),
@@ -408,9 +407,9 @@ if __name__ == '__main__':
     try:
         main(args)
     except (KeyboardInterrupt, SystemExit) as e:
-        if len(e.args) > 0:
-            logging.getLogger('starry_night').info('Shutdown due to error!')
-        else:
+        if len(e.args) == 0 or e.args[0] == 0:
             logging.getLogger('starry_night').info('Exit')
+        else:
+            logging.getLogger('starry_night').info('Shutdown due to error!')
     except:
         raise
