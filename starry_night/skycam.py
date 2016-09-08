@@ -858,12 +858,12 @@ def isInRange(position, stars, rng, unit='deg'):
             ra1 = position['ra']
             dec1 = position['dec']
             deltaDeg = 2*np.arcsin(np.sqrt(np.sin((dec1-stars.dec)/2)**2 + np.cos(dec1)*np.cos(stars.dec)*np.sin((ra1-stars.ra)/2)**2))
-        except AttributeError as e:
+        except (AttributeError, KeyError) as e:
             try:
                 alt1 = position['altitude']
                 az1 = position['azimuth']
                 deltaDeg = 2*np.arcsin(np.sqrt(np.sin((az1-stars.azimuth)/2)**2 + np.cos(az1)*np.cos(stars.azimuth)*np.sin((alt1-stars.altitude)/2)**2))
-            except AttributeError as e:
+            except (AttributeError,KeyError) as e:
                 log = logging.getLogger(__name__)
                 log.error('Degree value needed but object has no ra/dec an no alt/az attribute. {}'.format(e))
 
