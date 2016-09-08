@@ -44,7 +44,7 @@ import numpy as np
 import pandas as pd
 import configparser
 import matplotlib as mpl
-mpl.use('Agg')
+#mpl.use('Agg')
 import matplotlib.pyplot as plt
 import skimage.filters
 from matplotlib import rc, cm
@@ -179,8 +179,7 @@ def main(args):
     else:
         # use image(s) provided by the user and search for directories
         i = 0
-        maxLen = len(args['<image>']) 
-        while maxLen > i:
+        while len(args['<image>']) > i:
             if os.path.isdir(args['<image>'][i]):
                 _dir = args['<image>'].pop(i)
                 for root, dirs, files in os.walk(_dir):
@@ -235,6 +234,8 @@ def main(args):
         cloudmap_list = list(map(lambda x: x['cloudmap'], results))
 
     df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
+    embed()
+
     del results
     del star_list
     del timestamp_list
@@ -269,7 +270,7 @@ def main(args):
 
             grouped = df.groupby('HIP')
             #remove stars that do not have a wide enough span of their altitude for plotting
-            plot_df = grouped.filter(lambda x: x.altitude.max() > np.percentile(df.altitude, 95) and x.altitude.min() < np.percentile(df.altitude, 5))
+            plot_df = grouped.filter(lambda x, df=df: x.altitude.max() > np.percentile(df.altitude, 95) and x.altitude.min() < np.percentile(df.altitude, 5))
 
             for i, vmag in enumerate(vmag_to_plot):
                 c = color[i]
@@ -320,17 +321,20 @@ def main(args):
             # do a fit of all transmissions
             r = np.array(r)
             popt, pcov = curve_fit(skycam.lin, r[:,0], r[:,3], sigma=r[:,4], p0=[0,0])
-            x = np.linspace(-2,8,5)
+            x = np.linspace(0,np.pi/2,5)
             y = skycam.lin(x, popt[0], popt[1])
 
             fig = plt.figure()
             ax = fig.add_subplot(111)
-            plt.errorbar(r[:,0], r[:,3], yerr=r[:,4], linestyle='', color='blue', marker='o', ms=2)
-            plt.plot(x,y, color='red', label='linear regression')
+            plt.errorbar(r[:,0]*180/np.pi, r[:,3], yerr=r[:,4], linestyle='', color='blue', marker='o', ms=2)
+            plt.plot(x*180/np.pi,y, color='red', label='linear regression')
+            plt.xlabel('Max observed star altitude')
+            plt.ylabel('Airmass coefficient')
             plt.grid()
             plt.legend()
             plt.show()
             plt.hist(r[:,3], bins=100, range=(-1,2))
+            plt.xlabel('Airmass coefficient')
             plt.show()
             print(popt, pcov)
             del grouped
@@ -358,7 +362,7 @@ def main(args):
         ax.set_xlabel('Star Magnitude')
         plt.show()
         if args['-s']:
-            plt.savefig('response_{}_mean.pdf'.format(args['--function']))
+            plt.savefig('response_{}_mean.png'.format(args['--function']))
         if args['-v']:
             plt.show()
         plt.close('all')
@@ -370,6 +374,7 @@ def main(args):
 
         print('Tracking done')
     
+    embed()
 
     '''
     def logf(x, m, b):

@@ -1,3 +1,4 @@
+from starry_night import sql
 import pandas as pd
 import numpy as np
 import matplotlib as mpl
@@ -18,6 +19,7 @@ from io import BytesIO
 from skimage.io import imread
 from skimage.color import rgb2gray
 import skimage.filters
+import warnings
 
 from datetime import datetime, timedelta
 
@@ -31,6 +33,7 @@ from hashlib import sha1
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError, InternalError
 from IPython import embed
+
 
 
 def lin(x,m,b):
@@ -414,6 +417,7 @@ def celObjects_dict(config):
         planets = planets.append(data, ignore_index=True)
 
     # add points_of_interest
+    log.debug('Add points of interest')
     try:
         points_of_interest = pd.read_csv(
             config['analysis']['points_of_interest'],
@@ -438,6 +442,9 @@ def celObjects_dict(config):
         except OSError as e:
             log.error('File with points of interest not found: {}'.format(e))
             sys.exit(1)
+        else:
+            log.debug('Found {}'.format(poi_filename))
+
     points_of_interest['altitude'] = np.NaN
     points_of_interest['azimuth'] = np.NaN
     points_of_interest['radius'] = float(config['analysis']['poi_radius'])
@@ -595,6 +602,61 @@ def update_star_position(data, observer, conf, crop, args):
 
     return {'stars':stars, 'planets':planets, 'points_of_interest': points_of_interest, 'moon': moonData, 'sun': sunData}
 
+def findLocalStd(img, x, y, radius):
+    '''
+    ' Returns value of brightest pixel within radius
+    '''
+    try:
+        x = int(x)
+        y = int(y)
+    except TypeError:
+        x = x.astype(int)
+        y = y.astype(int)
+    
+    # get interval border
+    x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
+    y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
+    radius = x_interval[1]-x_interval[0] , y_interval[1]-y_interval[0]
+
+    # do subselection
+    subImg = img[y_interval[0]:y_interval[1] , x_interval[0]:x_interval[1]]
+    try:
+        return np.nanstd(subImg.flatten())
+    except RuntimeWarning:
+        print('NAN')
+        return 0
+    except ValueError:
+        print('Star outside image')
+        return 0
+
+
+def findLocalMean(img, x, y, radius):
+    '''
+    ' Returns value of brightest pixel within radius
+    '''
+    try:
+        x = int(x)
+        y = int(y)
+    except TypeError:
+        x = x.astype(int)
+        y = y.astype(int)
+    
+    # get interval border
+    x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
+    y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
+    radius = x_interval[1]-x_interval[0] , y_interval[1]-y_interval[0]
+
+    # do subselection
+    subImg = img[y_interval[0]:y_interval[1] , x_interval[0]:x_interval[1]]
+    try:
+        return np.nanmean(subImg.flatten())
+    except RuntimeWarning:
+        print('NAN')
+        return 0
+    except ValueError:
+        print('Star outside image')
+        return 0
+
 
 def findLocalMaxValue(img, x, y, radius):
     '''
@@ -704,6 +766,16 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             sys.exit(1)
     time += timedelta(minutes=float(config['properties']['timeoffset']))
     return dict({'img': img, 'timestamp': time})
+
+def update_crop_moon(crop_mask, moon, conf):
+    nrows, ncols = crop_mask.shape
+    row, col = np.ogrid[:nrows, :ncols]
+    x = moon['x']
+    y = moon['y']
+    r = theta2r(float(conf['analysis']['minAngleToMoon'])/180*np.pi, float(conf['image']['radius']), how=conf['image']['angleprojection'])
+    crop_mask = crop_mask | ((row - y)**2 + (col - x)**2 < r**2)
+    return crop_mask
+
 
     
 def get_crop_mask(img, crop):
@@ -911,7 +983,7 @@ def process_image(images, data, config, args):
 
     output = dict()
     if not images:
-        return output
+        return
 
 
     log.info('Processing image taken at: {}'.format(images['timestamp']))
@@ -922,7 +994,7 @@ def process_image(images, data, config, args):
     # stop processing if sun is too high or config file does not match
     if images['img'].shape[1]  != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):
         log.error('Resolution does not match: {}!={}. Wrong config file?'.format(c_res, i_res))
-        return output
+        return
     sun = ephem.Sun()
     sun.compute(observer)
     moon = ephem.Moon()
@@ -930,19 +1002,21 @@ def process_image(images, data, config, args):
     if not args['--daemon']:
         if np.rad2deg(sun.alt) > -10:
             log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
-            return output
+            return 
         elif np.rad2deg(moon.alt) > -10:
             log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
-            return output
+            return
 
     # put timestamp and hash sum into output dict
     output['timestamp'] = images['timestamp']
-    output['hash'] = sha1(images['img'].data).hexdigest()
+    try:
+        output['hash'] = sha1(images['img'].data).hexdigest()
+    except BufferError:
+        output['hash'] = sha1(np.ascontiguousarray(images['img']).data).hexdigest()
+        
 
     # create cropping array to mask unneccessary image regions.
     crop_mask = get_crop_mask(images['img'], config['crop'])
-    images['img'][crop_mask] = np.NaN
-    img = images['img']
 
     # update celestial objects (ignore planets, because they are bigger than stars and mess up the detection)
     celObjects = update_star_position(data, observer, config, crop_mask, args)
@@ -950,10 +1024,16 @@ def process_image(images, data, config, args):
     if stars.empty:
         log.error('No stars in DataFrame. Maybe all got removed by cropping? No analysis possible.')
         return
+    crop_mask = update_crop_moon(crop_mask, celObjects['moon'], config)
+    images['img'][crop_mask] = np.NaN
+    output['brightness_mean'] = np.nanmean(images['img'])
+    output['brightness_std'] = np.nanmean(images['img'])
+    img = images['img']
     
     # calculate response of stars
     if args['--kernel']:
-        kernelSize = np.arange(1, int(args['--kernel'])+1, 5)
+        kernelSize = float(args['--kernel']),
+        #np.arange(1, int(args['--kernel'])+1, 5)
         stars_orig = stars.copy()
     else:
         kernelSize = [float(config['analysis']['kernelsize'])]
@@ -1014,6 +1094,8 @@ def process_image(images, data, config, args):
 
         # calculate response and drop stars that were not found at all, because response=0 interferes with log-plot
         stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
+        #stars['response_mean'] = stars.apply(lambda s : findLocalMean(resp, s.x, s.y, tolerance*2), axis=1)
+        #stars['response_std'] = stars.apply(lambda s : findLocalStd(resp, s.x, s.y, tolerance*2), axis=1)
         stars.query('response > 1e-100', inplace=True)
 
         # correct atmospherice absorbtion
@@ -1038,6 +1120,7 @@ def process_image(images, data, config, args):
                     ((stars['vmag']*float(lim[0][0]) + float(lim[0][1])) - (stars['vmag']*float(lim[1][0]) + float(lim[1][1])))
                     )
                 )
+        #stars.loc[stars.response_std/stars.response_mean > 1.5, 'visible'] = 0
         # set visible = 0 for all magnitudes where upperLimit < lowerLimit
         stars.loc[stars.vmag.values > (float(lim[1][1]) - float(lim[0][1])) / (float(lim[0][0]) - float(lim[1][0])), 'visible'] = 0
 
@@ -1062,7 +1145,7 @@ def process_image(images, data, config, args):
     stars = celObjects['stars']
 
     if len(kernelSize) == 1:
-        celObjects['points_of_interest']['star_percentage'] = celObjects['points_of_interest'].apply(
+        celObjects['points_of_interest']['starPercentage'] = celObjects['points_of_interest'].apply(
                 lambda p,stars=stars : calc_star_percentage(p, stars, p.radius, unit='deg', lim=-1, weight=True),
                 axis=1)
     else:
@@ -1075,7 +1158,7 @@ def process_image(images, data, config, args):
         output['img'] = img
         fig = plt.figure(figsize=(16,9))
         vmin = np.nanpercentile(img, 5)
-        vmax = np.nanpercentile(img, 99.)
+        vmax = np.nanpercentile(img, 90.)
         plt.imshow(img, vmin=vmin,vmax=vmax, cmap='gray')
         stars.plot.scatter(x='x',y='y', ax=plt.gca(), c='visible', cmap = plt.cm.RdYlGn, s=30, vmin=0, vmax=1, grid=True)
         celObjects['points_of_interest'].plot.scatter(x='x', y='y', ax=plt.gca(), s=80, color='white', marker='^', label='Sources')
@@ -1108,6 +1191,7 @@ def process_image(images, data, config, args):
             stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values,
                     cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
             ax.set_xlim((-1, max(stars['vmag'])+0.5))
+            ax.set_ylim((10**(lim[1][1]-1),10**(lim[0][1]+1)))
             ax.set_ylabel('Kernel Response')
             ax.set_xlabel('Star Magnitude')
             if args['-c'] == 'GTC':
@@ -1130,7 +1214,7 @@ def process_image(images, data, config, args):
             
             ax.legend(loc='best')
             if args['-s']:
-                plt.savefig('response_{}_{}.pdf'.format(args['--function'], images['timestamp'].isoformat()))
+                plt.savefig('response_{}_{}.png'.format(args['--function'], images['timestamp'].isoformat()))
             if args['--daemon']:
                 plt.savefig('response_{}.png'.format(config['properties']['name']),dpi=200)
             if args['-v']:
@@ -1206,7 +1290,7 @@ def process_image(images, data, config, args):
 
     if args['--cloudmap'] or args['--cloudtrack'] or args['--daemon']:
         log.debug('Calculating cloud map')
-        cloud_map = calc_cloud_map(stars, img.shape[1]//30, img.shape, weight=True)
+        cloud_map = calc_cloud_map(stars, img.shape[1]//80, img.shape, weight=True)
         cloud_map[crop_mask] = np.NaN
         if args['--cloudtrack']:
             output['cloudmap'] = cloud_map
@@ -1238,32 +1322,29 @@ def process_image(images, data, config, args):
     output['moon_alt'] = celObjects['moon']['altitude']
     output['moon_phase'] = celObjects['moon']['moonPhase']
 
+    if args['--sql']:
+        try:
+            sql.writeSQL(config, output)
+        except (OperationalError):
+            log.error('Writing to SQL server failed. Server up? Password correct?')
+        except InternalError as e:
+            log.error('Error while writing to SQL server: {}'.format(e))
 
-    if args['--sql'] or args['--low-memory'] or args['--daemon']:
+
+    if args['--low-memory']:
         slimOutput = dict()
-        for key in ['timestamp', 'hash','sun']:
+        for key in ['timestamp', 'hash', 'points_of_interest', 'sun_alt', 'moon_alt', 'moon_phase', 'brightness_mean', 'brightness_std']:
             try:
                 slimOutput[key] = [output[key]]
             except KeyError:
-                pass
-        for key in ['timestamp', 'hash']:
-            try:
-                slimOutput[key] = [output[key]]
-            except KeyError:
-                pass
+                log.warning('Key {} was not found in dataframe so it can not be returned/stored'.format(key))
+        del output
+        output = slimOutput
+        del slimOutput
                 
-        if args['--sql']:
-            try:
-                connection = create_engine(config['SQL']['connection'])
-                pd.DataFrame(slimOutput).to_sql(config['SQL']['table'], con=connection, if_exists='append', index=False)
-            except (OperationalError):
-                log.error('Writing to SQL server failed. Server up? Password correct?')
-            except InternalError as e:
-                log.error('Error while writing to SQL server: {}'.format(e))
-        if args['--low-memory'] or args['--daemon']:
-            del output
-            output = slimOutput
-            del slimOutput
+    if args['--daemon']:
+        del output
+        output = None
 
     log.info('Done')
     return output
