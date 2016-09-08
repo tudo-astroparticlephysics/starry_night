@@ -25,9 +25,9 @@ import os
 import time
 import sys
 import configparser
+import matplotlib.pyplot as plt
 from starry_night import skycam
 from re import split
-import matplotlib.pyplot as plt
 from IPython import embed
 
 
@@ -107,13 +107,15 @@ def main(args):
             crop_mask = skycam.get_crop_mask(img, config['crop'])
             img[crop_mask] = 0
             img_inv[~crop_mask] = 0
+            vmin = np.nanpercentile(img,5)
+            vmax = np.nanpercentile(img,90)
             fig = plt.figure()
             ax1 = fig.add_subplot(121)
-            ax1.imshow(img, cmap='gray')
+            ax1.imshow(img, cmap='gray', vmin=vmin, vmax=vmax)
             ax1.grid()
             ax1.set_title('Cropped Image - It looks like this')
             ax2 = fig.add_subplot(122)
-            ax2.imshow(img_inv, cmap='gray')
+            ax2.imshow(img_inv, cmap='gray', vmin=vmin, vmax=vmax)
             ax2.grid()
             ax2.set_title('Inverted - As double check')
             plt.show()
