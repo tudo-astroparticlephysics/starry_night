@@ -18,6 +18,7 @@ class SqlEntry(Base):
     moonPhase = Column(Float)
     brightnessMean = Column(Float)
     brightnessStd = Column(Float)
+    global_star_perc = Column(Float)
 
 
 class SqlPoiEntry(Base):
@@ -46,6 +47,7 @@ def writeSQL(config, data):
                     moonPhase=data['moon_phase'],
                     brightnessMean=data['brightness_mean'].item(),
                     brightnessStd=data['brightness_std'].item(),
+                    global_star_perc = data['global_star_perc']
                 )
     )
 

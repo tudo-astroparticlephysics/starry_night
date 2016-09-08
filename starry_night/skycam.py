@@ -2,7 +2,6 @@ from starry_night import sql
 import pandas as pd
 import numpy as np
 import matplotlib as mpl
-mpl.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import rc, cm
 from mpl_toolkits.axes_grid.inset_locator import inset_axes
@@ -882,7 +881,7 @@ def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
     
     Position is dictionary and can contain Ra,Dec and/or x,y
     Range is degree or pixel radius depending on whether unit is 'grad' or 'pixel'
-    Lim is limit visibility that separates visible stars from not visible. [0.0 - 1.0]. If
+    Lim > 0: is limit visibility that separates visible stars from not visible. [0.0 - 1.0].
     lim < 0 then all stars in range will be used and 'visible' is a weight factor
     Weight = True: each star is multiplied by weight [100**(1/5)]**-magnitude -> bright stars have more impact
     '''
@@ -999,6 +998,7 @@ def process_image(images, data, config, args):
     sun.compute(observer)
     moon = ephem.Moon()
     moon.compute(observer)
+    '''
     if not args['--daemon']:
         if np.rad2deg(sun.alt) > -10:
             log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
@@ -1006,6 +1006,7 @@ def process_image(images, data, config, args):
         elif np.rad2deg(moon.alt) > -10:
             log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
             return
+    '''
 
     # put timestamp and hash sum into output dict
     output['timestamp'] = images['timestamp']
@@ -1150,6 +1151,7 @@ def process_image(images, data, config, args):
                 axis=1)
     else:
         log.warning('Can not process points_of_interest if multiple kernel sizes get used')
+    output['global_star_perc'] = calc_star_percentage({'altitude': np.pi/2, 'azimuth':0}, stars, float(config['image']['openingangle']), unit='deg', lim=-1, weight=True)
     
     
     ##################################
@@ -1291,7 +1293,7 @@ def process_image(images, data, config, args):
     if args['--cloudmap'] or args['--cloudtrack'] or args['--daemon']:
         log.debug('Calculating cloud map')
         cloud_map = calc_cloud_map(stars, img.shape[1]//80, img.shape, weight=True)
-        cloud_map[crop_mask] = np.NaN
+        cloud_map[crop_mask] = 1
         if args['--cloudtrack']:
             output['cloudmap'] = cloud_map
         if args['--cloudmap']:
