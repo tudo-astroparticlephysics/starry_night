@@ -992,7 +992,7 @@ def process_image(images, data, config, args):
 
     # stop processing if sun is too high or config file does not match
     if images['img'].shape[1]  != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):
-        log.error('Resolution does not match: {}!={}. Wrong config file?'.format(c_res, i_res))
+        log.error('Resolution does not match: {}!={}. Wrong config file?'.format(images['img'].shape,config['image']['resolution']))
         return
     sun = ephem.Sun()
     sun.compute(observer)
@@ -1164,6 +1164,13 @@ def process_image(images, data, config, args):
         plt.imshow(img, vmin=vmin,vmax=vmax, cmap='gray')
         stars.plot.scatter(x='x',y='y', ax=plt.gca(), c='visible', cmap = plt.cm.RdYlGn, s=30, vmin=0, vmax=1, grid=True)
         celObjects['points_of_interest'].plot.scatter(x='x', y='y', ax=plt.gca(), s=80, color='white', marker='^', label='Sources')
+        plt.gca().text(0.98, 0.02, str(output['timestamp']),
+            verticalalignment='bottom', horizontalalignment='right',
+            transform=plt.gca().transAxes,
+            backgroundcolor='black',
+            color='white', fontsize=15,
+        )
+
         plt.colorbar()
         plt.tight_layout()
 

@@ -339,6 +339,29 @@ def main(args):
             print(popt, pcov)
             del grouped
 
+            fig = plt.figure(figsize=(16,9))
+            x = np.linspace(5/180*np.pi, np.pi/2, 200)
+            t=popt[1]
+
+            y1 = sk.transmission(x,1, t)
+            y2 = sk.transmission2(x,1, t)
+            y3 = sk.transmission3(x,1, t)
+
+            ax = fig.add_subplot(111)
+            ax.plot(x*180/np.pi,y1, label='Planar')
+            ax.plot(x*180/np.pi,y2, label='Planar Corrected')
+            ax.plot(x*180/np.pi,y3, label='Spherical elevated observer')
+            ax.grid()
+            ax.set_xlabel('Altitude')
+            ax.set_ylabel('Transmission')
+            ax.legend(loc='best')
+            ax.text(0.95, 0.01, 'Transmission coefficient = {}'.format(t),
+                verticalalignment='bottom', horizontalalignment='right',
+                transform=ax.transAxes,
+                color='black', fontsize=15
+            )
+            plt.show()
+
 
     if args['--response']:
         fig = plt.figure(figsize=(16,9))
