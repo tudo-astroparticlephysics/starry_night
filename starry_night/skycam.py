@@ -537,10 +537,10 @@ def update_star_position(data, observer, conf, crop, args):
     stars = data['stars'].copy()
     points_of_interest = data['points_of_interest'].copy()
     if args['-p']:
-        lidar = find_matching_pos(Time(data['timestamp']).mjd, data['positioning_file'])
+        lidar = find_matching_pos(Time(data['timestamp']).mjd, data['positioning_file'])/180*np.pi
         lidar['name'] = 'Lidar'
         lidar['ID'] = -2
-        lidar['radius'] = conf['analysis']['poi_radius']
+        lidar['radius'] = float(conf['analysis']['poi_radius'])
         points_of_interest = points_of_interest.append(lidar, ignore_index=True)
 
     stars['azimuth'], stars['altitude'] = equatorial2horizontal(
@@ -1316,6 +1316,11 @@ def process_image(images, data, config, args):
             ax.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
             ax.grid()
             plt.savefig('cloudMap_{}.png'.format(config['properties']['name']),dpi=200)
+    try:
+        output['global_coverage'] = np.nanmean(cloudmap)
+    except NameError:
+        log.warning('Cloudmap not available. Calculating global_coverage not possible')
+        output['global_coverage'] = np.float64(-1)
 
     del images
     output['stars'] = stars

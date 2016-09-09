@@ -73,9 +73,10 @@ if not os.path.exists(directory):
 
 # create handler for file and console output
 logfile_path = os.path.join(
-    directory, 'starry_night.log'
+    directory, 'starry_night-{}.log'.format(datetime.utcnow().isoformat())
     )
-logfile_handler = logging.FileHandler(filename=logfile_path)
+logfile_handler = logging.FileHandler(filename=logfile_path, mode='w')
+logfile_handler.setLevel(logging.INFO)
 logstream_handler = logging.StreamHandler()
 formatter = logging.Formatter(
     fmt='%(asctime)s - %(levelname)s - %(name)s | %(message)s',
@@ -183,7 +184,8 @@ def main(args):
                 for root, dirs, files in os.walk(_dir):
                     for f in files:
                         args['<image>'].append(os.path.join(root,f))
-            i += 1
+            else:
+                i += 1
 
         # no multiprocessing if only a single image was found
         if len(args['<image>']) == 1:
