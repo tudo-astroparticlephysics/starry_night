@@ -123,6 +123,12 @@ def main(args):
         sys.exit(1)
     del conf_succ
 
+    log.debug('Parsing Catalogue')
+    # data is a container for global data which does not belong to neither config nor args.
+    # data will be passed to all threads
+
+    data = skycam.celObjects_dict(config)
+
     # prepare everything for sql connection
     if args['--sql']:
         log.info('Storing results in SQL Database.\nConnection: {}\nPlease enter password'.format(config['SQL']['connection']))
@@ -136,10 +142,11 @@ def main(args):
         except OperationalError as e:
             log.error(e)
             sys.exit(1)
+    if not args['<image>']:
+        log.info('Please enter password to get acces to Magic lidar')
+        data['lidarpwd'] = getpass()
 
 
-    log.debug('Parsing Catalogue')
-    data = skycam.celObjects_dict(config)
 
     # read positioning file if any
     if args['-p']:
@@ -234,7 +241,6 @@ def main(args):
         cloudmap_list = list(map(lambda x: x['cloudmap'], results))
 
     df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
-    embed()
 
     del results
     del star_list

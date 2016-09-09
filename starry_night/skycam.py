@@ -27,7 +27,7 @@ from os.path import join
 import requests
 import logging
 
-from re import split
+from re import split, sub
 from hashlib import sha1
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError, InternalError
@@ -94,6 +94,28 @@ def get_last_modified(url, timeout):
     )
     return date
 
+def getMagicLidar(passwd):
+    '''
+    Return dict with data of the Magic lidar on LaPalma.
+    passwd is the FACT password to access the data
+    '''
+    try:
+        response = requests.get('http://www.magic.iac.es/site/weather/protected/lidar_data.txt',
+                auth=requests.auth.HTTPBasicAuth('FACT', passwd)
+            )
+        if response.ok:
+            dataString = response.content.decode('utf-8')
+        else:
+            log.error('Wrong password to Lidar')
+            return
+        dateValues = list(map(lambda dataString : int(sub("[a-zA-Z]+", "", dataString)), (split('\n',dataString)[7:-1])))
+        lidarData = list(map(lambda dataString : float(sub(".*\s", "", dataString)), (split('\n',dataString)[:6])))
+        timestamp = datetime(*dateValues[3:6], *dateValues[:3])
+    except Exception as e:
+        print(e)
+        raise
+    ret = {'timestamp': timestamp, 'altitude': (90-lidarData[0])/180*np.pi, 'azimuth': lidarData[1]/180*np.pi, 'T3':lidarData[2], 'T6':lidarData[3], 'T9':lidarData[4], 'T12':lidarData[5]}
+    return ret
 
 def downloadImg(url, timeout=None):
     '''
@@ -537,11 +559,12 @@ def update_star_position(data, observer, conf, crop, args):
     stars = data['stars'].copy()
     points_of_interest = data['points_of_interest'].copy()
     if args['-p']:
-        lidar = find_matching_pos(Time(data['timestamp']).mjd, data['positioning_file'])/180*np.pi
-        lidar['name'] = 'Lidar'
-        lidar['ID'] = -2
-        lidar['radius'] = float(conf['analysis']['poi_radius'])
-        points_of_interest = points_of_interest.append(lidar, ignore_index=True)
+        lidar_old = find_matching_pos(Time(data['timestamp']).mjd, data['positioning_file'])/180*np.pi
+        lidar_old['name'] = 'Lidar'
+        lidar_old['ID'] = -2
+        lidar_old['radius'] = float(conf['analysis']['poi_radius'])
+        points_of_interest = points_of_interest.append(lidar_old, ignore_index=True)
+
 
     stars['azimuth'], stars['altitude'] = equatorial2horizontal(
         stars.ra, stars.dec, observer,
@@ -549,13 +572,23 @@ def update_star_position(data, observer, conf, crop, args):
     points_of_interest['azimuth'], points_of_interest['altitude'] = equatorial2horizontal(
         points_of_interest.ra, points_of_interest.dec, observer,
     )
-    points_of_interest.append({
-        'name': 'Total_sky',
-        'azimuth': 0,
-        'altitude': np.pi/2,
-        'ID': -1,
-        'radius': float(conf['image']['openingangle']),
-    }, ignore_index=True)
+    # Get the magic Lidar
+    if data['lidarpwd']:
+        magicLidar_now = getMagicLidar(data['lidarpwd'])
+        if magicLidar_now:
+            magicLidar_now['name'] = 'Magic Lidar now'
+            magicLidar_now['ID'] = -3
+            magicLidar_now['radius'] = float(conf['analysis']['poi_radius'])
+            points_of_interest = points_of_interest.append({
+                'name': magicLidar_now['name'],
+                'ID' : magicLidar_now['ID'],
+                'radius' : magicLidar_now['radius'],
+                'altitude' : magicLidar_now['altitude'],
+                'azimuth' : magicLidar_now['azimuth'],
+            },ignore_index=True)
+            output['magic_lidar'] = magicLidar_now
+        else:
+            output['magic_lidar'] = None
 
     try:
         stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), conf['analysis']['vmaglimit']), inplace=True)
@@ -998,11 +1031,11 @@ def process_image(images, data, config, args):
     sun.compute(observer)
     moon = ephem.Moon()
     moon.compute(observer)
+    if np.rad2deg(sun.alt) > -10:
+        log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
+        return 
     '''
     if not args['--daemon']:
-        if np.rad2deg(sun.alt) > -10:
-            log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
-            return 
         elif np.rad2deg(moon.alt) > -10:
             log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
             return
