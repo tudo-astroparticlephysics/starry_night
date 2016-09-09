@@ -56,7 +56,7 @@ from getpass import getpass
 from sqlalchemy import create_engine
 
 from sqlalchemy.exc import OperationalError
-from requests.exceptions import Timeout
+import requests.exceptions as rex
 from tables import HDF5ExtError
 
 
@@ -143,8 +143,10 @@ def main(args):
             log.error(e)
             sys.exit(1)
     if not args['<image>']:
-        log.info('Please enter password to get acces to Magic lidar')
+        log.info('Please enter password to get acces to Magic lidar. Leave blank to skip.')
         data['lidarpwd'] = getpass()
+    else:
+        data['lidarpwd'] = None
 
 
 
@@ -172,7 +174,7 @@ def main(args):
                 log.info('No new image available. Try again in 30 s.')
                 time.sleep(30)
                 continue
-            except Timeout as e:
+            except (rex.ConnectionError) as e:
                 log.error('Download of image failed. Try again in 30 s. {}'.format(e))
                 time.sleep(30)
                 continue

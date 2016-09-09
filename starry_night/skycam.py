@@ -31,6 +31,7 @@ from re import split, sub
 from hashlib import sha1
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError, InternalError
+import requests.exceptions as rex
 from IPython import embed
 
 
@@ -99,23 +100,28 @@ def getMagicLidar(passwd):
     Return dict with data of the Magic lidar on LaPalma.
     passwd is the FACT password to access the data
     '''
+    log = logging.getLogger(__name__)
     try:
         response = requests.get('http://www.magic.iac.es/site/weather/protected/lidar_data.txt',
                 auth=requests.auth.HTTPBasicAuth('FACT', passwd)
             )
-        if response.ok:
-            dataString = response.content.decode('utf-8')
-        else:
-            log.error('Wrong password to Lidar')
-            return
-        dateValues = list(map(lambda dataString : int(sub("[a-zA-Z]+", "", dataString)), (split('\n',dataString)[7:-1])))
-        lidarData = list(map(lambda dataString : float(sub(".*\s", "", dataString)), (split('\n',dataString)[:6])))
-        timestamp = datetime(*dateValues[3:6], *dateValues[:3])
-    except Exception as e:
-        print(e)
-        raise
-    ret = {'timestamp': timestamp, 'altitude': (90-lidarData[0])/180*np.pi, 'azimuth': lidarData[1]/180*np.pi, 'T3':lidarData[2], 'T6':lidarData[3], 'T9':lidarData[4], 'T12':lidarData[5]}
-    return ret
+    except rex.ConnectionError as e:
+        log.error('Connecting to lidar failed {}'.format(e))
+        return
+    if response.ok:
+        dataString = response.content.decode('utf-8')
+    else:
+        log.error('Wrong lidar password')
+        return
+    dateValues = list(map(lambda dataString : int(sub("[a-zA-Z]+", "", dataString)), (split('\n',dataString)[7:-1])))
+    lidarData = list(map(lambda dataString : float(sub(".*\s", "", dataString)), (split('\n',dataString)[:6])))
+    timestamp = datetime(*dateValues[3:6], *dateValues[:3])
+
+    # abort if last lidar update was more than 15min ago
+    if datetime.utcnow() - timestamp > timedelta(minutes=15):
+        return
+    else:
+        return {'timestamp': timestamp, 'altitude': (90-lidarData[0])/180*np.pi, 'azimuth': lidarData[1]/180*np.pi, 'T3':lidarData[2], 'T6':lidarData[3], 'T9':lidarData[4], 'T12':lidarData[5]}
 
 def downloadImg(url, timeout=None):
     '''
@@ -573,22 +579,22 @@ def update_star_position(data, observer, conf, crop, args):
         points_of_interest.ra, points_of_interest.dec, observer,
     )
     # Get the magic Lidar
+    magicLidar_now = None
     if data['lidarpwd']:
         magicLidar_now = getMagicLidar(data['lidarpwd'])
         if magicLidar_now:
             magicLidar_now['name'] = 'Magic Lidar now'
             magicLidar_now['ID'] = -3
             magicLidar_now['radius'] = float(conf['analysis']['poi_radius'])
-            points_of_interest = points_of_interest.append({
-                'name': magicLidar_now['name'],
-                'ID' : magicLidar_now['ID'],
-                'radius' : magicLidar_now['radius'],
-                'altitude' : magicLidar_now['altitude'],
-                'azimuth' : magicLidar_now['azimuth'],
-            },ignore_index=True)
-            output['magic_lidar'] = magicLidar_now
-        else:
-            output['magic_lidar'] = None
+            points_of_interest = points_of_interest.append(
+                    {
+                        'name': magicLidar_now['name'],
+                        'ID' : magicLidar_now['ID'],
+                        'radius' : magicLidar_now['radius'],
+                        'altitude' : magicLidar_now['altitude'],
+                        'azimuth' : magicLidar_now['azimuth'],
+                    },ignore_index=True
+            )
 
     try:
         stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), conf['analysis']['vmaglimit']), inplace=True)
@@ -632,7 +638,7 @@ def update_star_position(data, observer, conf, crop, args):
     planets = planets[planets.apply(lambda p, crop=crop: ~crop[int(p['y']), int(p['x'])], axis=1)]
     points_of_interest = points_of_interest[points_of_interest.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
 
-    return {'stars':stars, 'planets':planets, 'points_of_interest': points_of_interest, 'moon': moonData, 'sun': sunData}
+    return {'stars':stars, 'planets':planets, 'points_of_interest': points_of_interest, 'moon': moonData, 'sun': sunData, 'lidar': magicLidar_now}
 
 def findLocalStd(img, x, y, radius):
     '''
@@ -925,7 +931,7 @@ def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
         starsInRange = stars[isInRange(position, stars, rng, unit)]
 
     if starsInRange.empty:
-        return -1
+        return np.float64(-1)
 
     if lim >= 0:
         if weight:
@@ -942,7 +948,7 @@ def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
             percentage = np.mean(starsInRange.visible.values)
 
 
-    return percentage
+    return np.float64(percentage)
 
 
 def calc_cloud_map(stars, rng, img_shape, weight=False):
@@ -1185,6 +1191,7 @@ def process_image(images, data, config, args):
     else:
         log.warning('Can not process points_of_interest if multiple kernel sizes get used')
     output['global_star_perc'] = calc_star_percentage({'altitude': np.pi/2, 'azimuth':0}, stars, float(config['image']['openingangle']), unit='deg', lim=-1, weight=True)
+    output['magic_lidar'] = celObjects['lidar']
     
     
     ##################################
