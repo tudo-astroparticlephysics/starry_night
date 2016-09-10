@@ -597,8 +597,8 @@ def update_star_position(data, observer, conf, crop, args):
             )
 
     try:
-        stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), conf['analysis']['vmaglimit']), inplace=True)
-        planets.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), conf['analysis']['vmaglimit']), inplace=True)
+        stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), data['vmaglimit']), inplace=True)
+        planets.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), data['vmaglimit']), inplace=True)
         points_of_interest.query('altitude > {}'.format(np.deg2rad(90 - float(conf['image']['openingangle']))), inplace=True)
     except:
         log.error('Using altitude or vmag limit failed!')
@@ -976,6 +976,9 @@ def calc_cloud_map(stars, rng, img_shape, weight=False):
         density_visible = skimage.filters.gaussian(scattered_stars_visible, rng, mode='mirror')
         density_all = skimage.filters.gaussian(scattered_stars, rng, mode='mirror')
     with np.errstate(divide='ignore',invalid='ignore'):
+        # density has some entries close to 0 which will result in artifacts after division.
+        # replace them with 1 so that small number / 1 ~ 0
+        density_all[density_all < 10*-10]=1
         cloud_map = np.true_divide(density_visible, density_all)
         cloud_map[~np.isfinite(cloud_map)] = 0
     return 1-cloud_map
@@ -1134,19 +1137,19 @@ def process_image(images, data, config, args):
 
         # calculate response and drop stars that were not found at all, because response=0 interferes with log-plot
         stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
-        #stars['response_mean'] = stars.apply(lambda s : findLocalMean(resp, s.x, s.y, tolerance*2), axis=1)
-        #stars['response_std'] = stars.apply(lambda s : findLocalStd(resp, s.x, s.y, tolerance*2), axis=1)
+        stars['response_mean'] = stars.apply(lambda s : findLocalMean(img, s.x, s.y, 50), axis=1)
+        stars['response_std'] = stars.apply(lambda s : findLocalStd(img, s.x, s.y, 50), axis=1)
         stars.query('response > 1e-100', inplace=True)
 
         # correct atmospherice absorbtion
-        lim = split('\\s*,\\s*', config['calibration']['airmass_absorbtion'])
         stars['response_orig'] = stars.response
-        stars['response'] = stars.response / transmission3(stars.altitude, 1.0, float(lim[0]))
+        stars['response'] = stars.response / transmission3(stars.altitude, 1.0, float(config['calibration']['airmass_absorbtion']))
         
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
             stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
-        lim = (split('\\s*,\\s*', config['analysis']['visibleupperlimit']), split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))
+        ulim, llim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), 
+                list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
 
         # calculate visibility percentage
         # if response > visibleUpperLimit -> visible=1
@@ -1156,13 +1159,16 @@ def process_image(images, data, config, args):
                 1,
                 np.maximum(
                     0,
-                    (np.log10(stars['response']) - (stars['vmag']*float(lim[1][0]) + float(lim[1][1]))) / 
-                    ((stars['vmag']*float(lim[0][0]) + float(lim[0][1])) - (stars['vmag']*float(lim[1][0]) + float(lim[1][1])))
+                    (np.log10(stars['response']) - (stars['vmag']*llim[0] + llim[1])) / 
+                    ((stars['vmag']*ulim[0] + ulim[1]) - (stars['vmag']*float(llim[0]) + llim[1]))
                     )
                 )
         #stars.loc[stars.response_std/stars.response_mean > 1.5, 'visible'] = 0
         # set visible = 0 for all magnitudes where upperLimit < lowerLimit
-        stars.loc[stars.vmag.values > (float(lim[1][1]) - float(lim[0][1])) / (float(lim[0][0]) - float(lim[1][0])), 'visible'] = 0
+        if ulim[0] < llim[0]:
+            stars.loc[stars.vmag.values > (llim[1] - ulim[1]) / (ulim[0] - llim[0]), 'visible'] = 0
+        elif ulim[0] > llim[0]:
+            stars.loc[stars.vmag.values < (llim[1] - ulim[1]) / (ulim[0] - llim[0]), 'visible'] = 0
 
         #stars['blobSize'] = stars.apply(lambda s : getBlobsize(resp[s.maxY-25:s.maxY+26, s.maxX-25:s.maxX+26], s.response*0.1), axis=1)
 
@@ -1199,10 +1205,11 @@ def process_image(images, data, config, args):
     if args['--cam'] or args['--daemon']:
         output['img'] = img
         fig = plt.figure(figsize=(16,9))
+        ax = fig.add_subplot(111)
         vmin = np.nanpercentile(img, 5)
         vmax = np.nanpercentile(img, 90.)
-        plt.imshow(img, vmin=vmin,vmax=vmax, cmap='gray')
-        stars.plot.scatter(x='x',y='y', ax=plt.gca(), c='visible', cmap = plt.cm.RdYlGn, s=30, vmin=0, vmax=1, grid=True)
+        ax.imshow(img, vmin=vmin,vmax=vmax, cmap='gray')
+        cax = ax.scatter(stars.x.values, stars.y.values, facecolors=None, c=stars.visible.values, cmap = plt.cm.RdYlGn, s=30, vmin=0, vmax=1)
         celObjects['points_of_interest'].plot.scatter(x='x', y='y', ax=plt.gca(), s=80, color='white', marker='^', label='Sources')
         plt.gca().text(0.98, 0.02, str(output['timestamp']),
             verticalalignment='bottom', horizontalalignment='right',
@@ -1211,7 +1218,9 @@ def process_image(images, data, config, args):
             color='white', fontsize=15,
         )
 
-        plt.colorbar()
+        cbar = fig.colorbar(cax)
+        cbar.ax.set_ylabel('Visibility')
+        
         plt.tight_layout()
 
         if args['-s']:
@@ -1230,17 +1239,20 @@ def process_image(images, data, config, args):
 
             # draw visibility limits
             x = np.linspace(-5+stars.vmag.min(), stars.vmag.max()+5, 20)
-            lim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), 
+            ulim, llim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), 
                     list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
-            y1 = 10**(x*lim[1][0] + lim[1][1])
-            y2 = 10**(x*lim[0][0] + lim[0][1])
+            y1 = 10**(x*llim[0] + llim[1])
+            y2 = 10**(x*ulim[0] + ulim[1])
             ax.plot(x, y1, c='red', label='lower limit')
             ax.plot(x, y2, c='green', label='upper limit')
 
             stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values,
                     cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
-            ax.set_xlim((-1, max(stars['vmag'])+0.5))
-            ax.set_ylim((10**(lim[1][1]-1),10**(lim[0][1]+1)))
+            ax.set_xlim((-1, float(config['analysis']['vmaglimit'])+0.5))
+            ax.set_ylim((
+                    10**(llim[0]*float(config['analysis']['vmaglimit'])+llim[1]),
+                    10**(ulim[0]*-1+ulim[1])
+                    ))
             ax.set_ylabel('Kernel Response')
             ax.set_xlabel('Star Magnitude')
             if args['-c'] == 'GTC':
@@ -1339,7 +1351,8 @@ def process_image(images, data, config, args):
 
     if args['--cloudmap'] or args['--cloudtrack'] or args['--daemon']:
         log.debug('Calculating cloud map')
-        cloud_map = calc_cloud_map(stars, img.shape[1]//80, img.shape, weight=True)
+        # empirical good value for radius of map: Area r**2 * PI should contain 0.75 stars on average
+        cloud_map = calc_cloud_map(stars, np.sqrt(1./ (len(stars.index)/float(config['image']['radius'])**2)), img.shape, weight=True)
         cloud_map[crop_mask] = 1
         if args['--cloudtrack']:
             output['cloudmap'] = cloud_map
@@ -1368,6 +1381,7 @@ def process_image(images, data, config, args):
     except NameError:
         log.warning('Cloudmap not available. Calculating global_coverage not possible')
         output['global_coverage'] = np.float64(-1)
+    embed()
 
     del images
     output['stars'] = stars

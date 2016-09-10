@@ -16,6 +16,7 @@ Options:
     --kernel=<k>    Try different kernel sizes from 1 to <k> in steps of 5
     --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG', 'All')
                     Using option '--ratescan' implies 'LoG'. [default: LoG]
+    --vmag=<v>      Set custom magnitude limit.
 
     --cam           Display camera image
     --ratescan      Create ratescan-like plot of visibility vs kernel response threshold
@@ -123,11 +124,13 @@ def main(args):
         sys.exit(1)
     del conf_succ
 
-    log.debug('Parsing Catalogue')
-    # data is a container for global data which does not belong to neither config nor args.
-    # data will be passed to all threads
 
+    # data is a container for global data and variables which do belong neither to config nor to args.
+    # data will be passed to all threads and is available for the analysis
+    log.debug('Parsing Catalogue')
     data = skycam.celObjects_dict(config)
+    if args['--vmag']:
+        data['vmaglimit'] = args['--vmag']
 
     # prepare everything for sql connection
     if args['--sql']:
@@ -440,7 +443,7 @@ def main(args):
         return 10**(m*x+b)
 
     sys.exit(0)
-    fit_stars = df.query('0 < vmag < {}'.format(float(config['analysis']['vmaglimit'])))
+    fit_stars = df.query('0 < vmag < {}'.format(float(data['vmaglimit'])))
     popt, pcov = curve_fit(logf, fit_stars.vmag.values, fit_stars.response.values, sigma=1/fit_stars.vmag.values, p0=(-0.2, 2))
     x = np.linspace(-3+fit_stars.vmag.min(), fit_stars.vmag.max(), 20)
     y = logf(x, popt[0], popt[1]-0.3)
