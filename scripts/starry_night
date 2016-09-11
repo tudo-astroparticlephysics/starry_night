@@ -17,6 +17,7 @@ Options:
     --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG', 'All')
                     Using option '--ratescan' implies 'LoG'. [default: LoG]
     --vmag=<v>      Set custom magnitude limit.
+    --moon          Stop processing if moon above -10° altitude.
 
     --cam           Display camera image
     --ratescan      Create ratescan-like plot of visibility vs kernel response threshold
@@ -131,6 +132,8 @@ def main(args):
     data = skycam.celObjects_dict(config)
     if args['--vmag']:
         data['vmaglimit'] = args['--vmag']
+    else:
+        data['vmaglimit'] = float(config['analysis']['vmaglimit'])
 
     # prepare everything for sql connection
     if args['--sql']:
@@ -406,7 +409,8 @@ def main(args):
         fig = plt.figure(figsize=(16,9))
         ax = plt.subplot(111)
         ax.semilogy()
-        ax.axhspan(ymin=11**2/255**2, ymax=13**2/255**2, color='red', alpha=0.5, label='Old threshold - Gradient')
+        if args['-c'] == 'GTC':
+            ax.axhspan(ymin=11**2/255**2, ymax=13**2/255**2, color='red', alpha=0.5, label='Old threshold - Gradient')
         mean.plot.scatter(x='vmag',y='response', yerr=std['response'].values, color='blue',
                 ax=ax, logy=True, grid=True, vmin=0, vmax=1, label='{} Response'.format(args['--function']))
         #mean.plot.scatter(x='vmag',y='response_grad', yerr=std['response_grad'].values, color='red', ax=ax, logy=True, grid=True, label='Gradient Response')

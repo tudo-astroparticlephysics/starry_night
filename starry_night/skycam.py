@@ -35,6 +35,8 @@ import requests.exceptions as rex
 from IPython import embed
 
 
+def LoG(x,y,sigma):
+    return 1/(np.pi*sigma**4)*(1-(x**2+y**2)/(2*sigma**2))*np.exp(-(x**2+y**2)/(2*sigma**2))
 
 def lin(x,m,b):
     return m*x+b
@@ -45,13 +47,13 @@ def transmission(x, a, c):
     '''
     x = np.pi/2 -x
     return a*np.exp(-c * (1/np.cos(x) - 1))
+
 def transmission2(x, a, c):
     '''
     return atmospheric transmission of planar model with correction (Young - 1974)
     '''
     x = np.pi/2 -x
     return a * np.exp(-c * (1/np.cos(x)*(1-0.0012*(1/np.cos(x)**2 - 1)) - 1))
-
 
 def transmission3(x, a, c):
     '''
@@ -181,7 +183,6 @@ def downloadImg(url, timeout=None):
         'img' : img,
         'timestamp' : timestamp,
         }
-
 
 
 def getBlobsize(img, thresh, limit=0):
@@ -346,7 +347,6 @@ def find_matching_pos(img_timestamp, time_pos_list):
     subset = time_pos_list.query('1/24/60 * 5 < MJD - {} < 1/24/60*10'.format(img_timestamp)).sort_values('MJD')
     closest = subset[subset.MJD==subset.MJD.min()]
     return closest[['ra','dec']]
-
 
 
 def obs_setup(properties):
@@ -640,9 +640,10 @@ def update_star_position(data, observer, conf, crop, args):
 
     return {'stars':stars, 'planets':planets, 'points_of_interest': points_of_interest, 'moon': moonData, 'sun': sunData, 'lidar': magicLidar_now}
 
+
 def findLocalStd(img, x, y, radius):
     '''
-    ' Returns value of brightest pixel within radius
+    ' Returns standard deviation of image within radius
     '''
     try:
         x = int(x)
@@ -670,7 +671,7 @@ def findLocalStd(img, x, y, radius):
 
 def findLocalMean(img, x, y, radius):
     '''
-    ' Returns value of brightest pixel within radius
+    ' Returns mean image brightness within radius
     '''
     try:
         x = int(x)
@@ -806,6 +807,9 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     return dict({'img': img, 'timestamp': time})
 
 def update_crop_moon(crop_mask, moon, conf):
+    '''
+    Add crop area for the moon to existing crop mask
+    '''
     nrows, ncols = crop_mask.shape
     row, col = np.ogrid[:nrows, :ncols]
     x = moon['x']
@@ -818,6 +822,7 @@ def update_crop_moon(crop_mask, moon, conf):
     
 def get_crop_mask(img, crop):
     '''
+    Return crop mask specified in 'crop'
     crop is dictionary with cropping information
     returns a boolean array in size of img: False got cropped; True not cropped 
     '''
@@ -841,39 +846,6 @@ def get_crop_mask(img, crop):
         disk_mask = np.full((nrows, ncols), False, dtype=bool)
 
     return disk_mask
-
-
-def loadImageTime(filename):
-    # assuming that the filename only contains numbers of timestamp
-    timestamp = re.findall('\d{2,}', filename)
-    timestamp = list(map(int, timestamp))
-
-    return datetime(*timestamp)
-
-
-# display fits image on screen
-def dispFits(image):
-    fig = plt.figure()
-    ax = fig.add_axes([0.05, 0.05, 0.95, 0.95])
-    vmin = np.nanpercentile(image, 0.5)
-    vmax = np.nanpercentile(image, 99.5)
-    image = (image - vmin)*(1000./(vmax-vmin))
-    vmin = np.nanpercentile(image, 0.5)
-    vmax = np.nanpercentile(image, 99.5)
-    ax.imshow(image, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
-    plt.show()
-
-
-def dispHist(image):
-    fig = plt.figure()
-    ax = fig.add_axes([0.05, 0.05, 0.95, 0.95])
-    '''
-    image = (image - vmin)*(1000./(vmax-vmin))
-    vmin = np.nanpercentile(image, 0.5)
-    vmax = np.nanpercentile(image, 99.5)
-    '''
-    plt.hist(image[~np.isnan(image)].ravel(), bins=100, range=(-150,2000))
-    plt.show()
 
 
 def isInRange(position, stars, rng, unit='deg'):
@@ -916,7 +888,7 @@ def isInRange(position, stars, rng, unit='deg'):
 def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
     '''
     Returns: percentage of stars within range of position that are visible 
-             and -1 if no stars in range
+             and -1 if no stars are in range
     
     Position is dictionary and can contain Ra,Dec and/or x,y
     Range is degree or pixel radius depending on whether unit is 'grad' or 'pixel'
@@ -1017,8 +989,10 @@ def filter_catalogue(catalogue, rng):
 
 def process_image(images, data, config, args):
     '''
-    This function applies all neccessary calculations to an image and returns the results.
-    Use it in the main loop!
+    This function applies all calculations to an image and returns results as dict.
+    For details read the comments below.
+
+    Use this in the main loop!
     '''
     log = logging.getLogger(__name__)
 
@@ -1043,12 +1017,10 @@ def process_image(images, data, config, args):
     if np.rad2deg(sun.alt) > -10:
         log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
         return 
-    '''
-    if not args['--daemon']:
-        elif np.rad2deg(moon.alt) > -10:
+    if args['--moon']:
+        if np.rad2deg(moon.alt) > -10:
             log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
             return
-    '''
 
     # put timestamp and hash sum into output dict
     output['timestamp'] = images['timestamp']
@@ -1058,22 +1030,24 @@ def process_image(images, data, config, args):
         output['hash'] = sha1(np.ascontiguousarray(images['img']).data).hexdigest()
         
 
-    # create cropping array to mask unneccessary image regions.
+    # create cropping mask for unneccessary image regions.
     crop_mask = get_crop_mask(images['img'], config['crop'])
 
-    # update celestial objects (ignore planets, because they are bigger than stars and mess up the detection)
+    # update celestial objects
     celObjects = update_star_position(data, observer, config, crop_mask, args)
+    # merge objects (ignore planets, because they are bigger than stars and mess up the detection)
     stars = pd.concat([celObjects['stars'],])# celObjects['planets']])
     if stars.empty:
         log.error('No stars in DataFrame. Maybe all got removed by cropping? No analysis possible.')
         return
+    # also crop the moon
     crop_mask = update_crop_moon(crop_mask, celObjects['moon'], config)
     images['img'][crop_mask] = np.NaN
     output['brightness_mean'] = np.nanmean(images['img'])
     output['brightness_std'] = np.nanmean(images['img'])
     img = images['img']
     
-    # calculate response of stars
+    # calculate response of stars with image kernel
     if args['--kernel']:
         kernelSize = float(args['--kernel']),
         #np.arange(1, int(args['--kernel'])+1, 5)
@@ -1085,7 +1059,7 @@ def process_image(images, data, config, args):
     for k in kernelSize:
         log.debug('Apply image filters. Kernelsize = {}'.format(k))
 
-        # undo all changes, if we are in a loop
+        # undo all changes, if we are testing multiple kernel sizes
         if len(kernelSize) > 1:
             stars = stars_orig.copy()
         stars['kernel'] = k
@@ -1201,6 +1175,8 @@ def process_image(images, data, config, args):
     
     
     ##################################
+    # processing done. Now plot everything
+    ##################################
 
     if args['--cam'] or args['--daemon']:
         output['img'] = img
@@ -1209,22 +1185,19 @@ def process_image(images, data, config, args):
         vmin = np.nanpercentile(img, 5)
         vmax = np.nanpercentile(img, 90.)
         ax.imshow(img, vmin=vmin,vmax=vmax, cmap='gray')
-        cax = ax.scatter(stars.x.values, stars.y.values, facecolors=None, c=stars.visible.values, cmap = plt.cm.RdYlGn, s=30, vmin=0, vmax=1)
+        cax = ax.scatter(stars.x.values, stars.y.values, c=stars.visible.values, cmap = plt.cm.RdYlGn, s=30, vmin=0, vmax=1)
         celObjects['points_of_interest'].plot.scatter(x='x', y='y', ax=plt.gca(), s=80, color='white', marker='^', label='Sources')
-        plt.gca().text(0.98, 0.02, str(output['timestamp']),
+        ax.text(0.98, 0.02, str(output['timestamp']),
             verticalalignment='bottom', horizontalalignment='right',
-            transform=plt.gca().transAxes,
+            transform=ax.transAxes,
             backgroundcolor='black',
             color='white', fontsize=15,
         )
-
         cbar = fig.colorbar(cax)
         cbar.ax.set_ylabel('Visibility')
-        
-        plt.tight_layout()
 
         if args['-s']:
-            plt.savefig('cam_image_{}.pdf'.format(images['timestamp'].isoformat()))
+            plt.savefig('cam_image_{}.png'.format(images['timestamp'].isoformat()))
         if args['--daemon']:
             plt.savefig('cam_image_{}.png'.format(config['properties']['name']),dpi=300)
         if args['-v']:
@@ -1362,6 +1335,12 @@ def process_image(images, data, config, args):
             vmax = np.nanpercentile(img, 99.9)
             ax1.imshow(img, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
             ax1.grid()
+            ax1.text(0.98, 0.02, str(output['timestamp']),
+                verticalalignment='bottom', horizontalalignment='right',
+                transform=ax1.transAxes,
+                backgroundcolor='black',
+                color='white', fontsize=15,
+            )
 
             ax2 = plt.subplot(122)
             ax2.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
@@ -1381,7 +1360,6 @@ def process_image(images, data, config, args):
     except NameError:
         log.warning('Cloudmap not available. Calculating global_coverage not possible')
         output['global_coverage'] = np.float64(-1)
-    embed()
 
     del images
     output['stars'] = stars
