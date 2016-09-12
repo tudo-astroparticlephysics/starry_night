@@ -434,13 +434,13 @@ def main(args):
         plt.close('all')
     
     if args['--cloudtrack']:
-        ct = cloud_tracker.CloudTracker(config['image'])
+        embed()
+        ct = cloud_tracker.CloudTracker(config)
         for cloudmap in cloudmap_list:
             ct.update(cloudmap)
 
         print('Tracking done')
     
-    embed()
 
     '''
     def logf(x, m, b):

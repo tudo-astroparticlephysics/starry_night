@@ -1329,6 +1329,7 @@ def process_image(images, data, config, args):
         cloud_map[crop_mask] = 1
         if args['--cloudtrack']:
             output['cloudmap'] = cloud_map
+            np.save('cMap_{}'.format(output['timestamp']), np.nan_to_num(cloud_map))
         if args['--cloudmap']:
             ax1 = plt.subplot(121)
             vmin = np.nanpercentile(img, 5.5)
