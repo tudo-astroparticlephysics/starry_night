@@ -26,7 +26,7 @@ class SqlEntry(Base):
 
 class SqlPoiEntry(Base):
     '''
-    Entry for a point of interest object
+    Entry for a 'point of interest' object
     '''
     __tablename__ = 'local'
     entry = Column(Integer, primary_key=True, autoincrement=True)
@@ -38,6 +38,9 @@ class SqlPoiEntry(Base):
 
 
 def writeSQL(config, data):
+    '''
+    Write data to the SQL database specified in config
+    '''
     log = logging.getLogger(__name__)
     log.debug('Create SQL engine')
     engine = create_engine(config['SQL']['connection'])

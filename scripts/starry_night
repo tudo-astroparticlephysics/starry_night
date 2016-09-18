@@ -246,7 +246,7 @@ def main(args):
     star_list = list(map(lambda x: x['stars'], results))
     timestamp_list = list(map(lambda x: x['timestamp'], results))
     if args['--cloudtrack']:
-        cloudmap_list = list(map(lambda x: x['cloudmap'], results))
+        cloudmap_list = list(map(lambda x: x['cloudmap'], results)), timestamp_list
 
     df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
 

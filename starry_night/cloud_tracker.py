@@ -33,6 +33,7 @@ class CloudTracker:
     def __init__(self, config):
         self.log = logging.getLogger(__name__)
         self.maxID = 0
+        self.timestamps = []
         self.maps = []
         self.trans_maps= []
         self.pred_map = [None, None, ] # can only calculate for third image
@@ -53,7 +54,6 @@ class CloudTracker:
             self.crop = skycam.get_crop_mask(cloudmap, self.config['crop'])
             self.trans_crop = self.__transform_map(self.crop)
         cloudmap[self.crop] = np.NaN
-        #cloudmap = self.__enlarge(cloudmap)
         self.maps.append(cloudmap)
         #self.trans_maps.append(self.__transform_map(cloudmap))
         self.trans_maps.append(cloudmap)
@@ -125,28 +125,33 @@ class CloudTracker:
     def print_clouds(self):
         print('Currently {} images loaded'.format(len(self.maps)))
         fig = plt.figure(figsize=(6,15))
+        plt.title('Current image - previous image shifted')
+        plt.axis('off')
         print('Wind:', self.wind_direction)
         for cnt, (i,j) in enumerate(zip(self.maps, self.trans_maps)):
             fig.add_subplot(len(self.maps), 2, 2*cnt+1)
             plt.gca().imshow(i, vmin=0, vmax=1)
             if self.wind_direction[cnt] != None:
-                plt.gca().arrow(i.shape[0]//2, i.shape[1]//2, self.wind_direction[cnt][0], self.wind_direction[cnt][1], color='yellow', lw=5,)
+                plt.gca().arrow(i.shape[0]//2, i.shape[1]//2, self.wind_direction[cnt][0], self.wind_direction[cnt][1], color='yellow', lw=5, label='Wind direction estimated')
+                plt.gca().set_ylabel(self.timestamps[cnt], rotation='horizontal', labelpad=55)
             fig.add_subplot(len(self.trans_maps), 2, 2*cnt+2)
             if self.pred_map[cnt] != None:
                 pred = self.pred_map[cnt]
                 plt.gca().imshow(self.pred_map[cnt], vmin=0, vmax=1)
             else:
                 plt.gca().imshow(np.ones(self.maps[0].shape), vmin=0, vmax=1)
+        plt.legend(loc='best')
         plt.tight_layout()
         plt.savefig('cloud_movement.png') 
         plt.show()
 
     # update detects clouds in cloudmap and updates old cloud positions
-    def update(self, cloudmap):
+    def update(self, cloudmap, timestamp):
         print('update')
         self.log.debug('Update')
         # store projection of clouds on atmosphere
         self.__add_cloud(cloudmap)
+        self.timestamps.append(timestamp)
 
         if len(self.maps) > 1:
             direct, val = self.__calculate_movement(self.trans_maps[-1], self.trans_maps[-2])
@@ -157,6 +162,7 @@ class CloudTracker:
         if (len(self.maps) > self.max_maps):
             self.maps.pop(0)
             self.trans_maps.pop(0)
+            self.timestamps.pop(0)
         if (len(self.wind_direction) > self.max_maps):
             self.wind_direction.pop(0)
             self.wind_speed.pop(0)

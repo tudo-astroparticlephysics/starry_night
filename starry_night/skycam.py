@@ -43,7 +43,7 @@ def lin(x,m,b):
 
 def transmission(x, a, c):
     '''
-    return atmospheric transmission of planar model
+    Return atmospheric transmission of planar model
     '''
     x = np.pi/2 -x
     return a*np.exp(-c * (1/np.cos(x) - 1))
@@ -57,8 +57,9 @@ def transmission2(x, a, c):
 
 def transmission3(x, a, c):
     '''
-    return atmospheric transmission of spheric model with elevated observer
-    This model does not return 1.0 for zenith angle so we subtract airM_0 instead in the end
+    Return atmospheric transmission of spheric model with elevated observer
+    x: zenith angle in rad
+    a: amplitude. So: transmission(0,a,b) = a 
     '''
     yObs=2.2
     yAtm=9.5
@@ -70,21 +71,9 @@ def transmission3(x, a, c):
 
     airMass = np.sqrt( ( r + y )**2 * np.cos(x)**2 + 2.*r*(1.-y) - y**2 + 1.0 ) - (r+y)*np.cos(x)
     airM_0 = np.sqrt( ( r + y )**2 + 2.*r*(1.-y) - y**2 + 1.0 ) - (r+y)
+    #This model does not return 1.0 for zenith angle so we subtract airM_0 instead in the end instead of 1
     return a* np.exp(-c * (airMass - airM_0 ))
 
-'''
-y1 = sk.transmission(x, 1, 0.57)
-y2 = sk.transmission2(x, 1, 0.57)
-y4 = sk.transmission3(x, 1, 0.67)
-
-plt.plot(x,y1, label='Planar')
-plt.plot(x,y2, label='Planar korrektur')
-plt.plot(x,y4, label='geom 2200m')
-plt.grid()
-plt.ylim((0, 1.1))
-plt.legend(loc='lower right')
-plt.show()
-'''
 
 class TooEarlyError(Exception):
     pass
@@ -1333,7 +1322,7 @@ def process_image(images, data, config, args):
         if args['--cloudmap']:
             ax1 = plt.subplot(121)
             vmin = np.nanpercentile(img, 5.5)
-            vmax = np.nanpercentile(img, 99.9)
+            vmax = np.nanpercentile(img, 98.0)
             ax1.imshow(img, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
             ax1.grid()
             ax1.text(0.98, 0.02, str(output['timestamp']),
