@@ -49,7 +49,7 @@ class CloudTracker:
         a[img.shape[0]//2:-(img.shape[0]//2), img.shape[1]//2:-(img.shape[1]//2)] = img
         return a
 
-    def __add_cloud(self, cloudmap):
+    def __add_cloud(self, cloudmap, timestamp):
         if not self.maps:
             self.crop = skycam.get_crop_mask(cloudmap, self.config['crop'])
             self.trans_crop = self.__transform_map(self.crop)
@@ -57,6 +57,7 @@ class CloudTracker:
         self.maps.append(cloudmap)
         #self.trans_maps.append(self.__transform_map(cloudmap))
         self.trans_maps.append(cloudmap)
+        self.timestamps.append(timestamp)
         self.maxID += 1
 
     def clear(self):
@@ -90,14 +91,17 @@ class CloudTracker:
         x,y = r * np.sin(phi) + cloudmap.shape[1]//2, r*np.cos(phi) + cloudmap.shape[0]//2
         return cloudmap[x.astype(int),y.astype(int)]
 
-    def __crop_shifted(self, img, shift_x, shift_y):
-            shifted_map = np.roll(np.roll(img, shift_x, axis=1), shift_y, axis=0)
-            xmin, xmax = max(0, shift_x), min(img.shape[1]+shift_x, img.shape[1])
-            ymin, ymax = max(0, shift_y), min(img.shape[0]+shift_y, img.shape[0])
-            mask = np.ones(img.shape, dtype=bool)
-            mask[ymin:ymax, xmin:xmax] = False
-            shifted_map[mask] = np.NaN
-            return shifted_map
+    def __shift_and_crop(self, img, shift_x, shift_y):
+        '''
+        Shift img by shift_x and shift_y and crop all pixels that were wrapped around the image border.
+        '''
+        shifted_map = np.roll(np.roll(img, shift_x, axis=1), shift_y, axis=0)
+        xmin, xmax = max(0, shift_x), min(img.shape[1]+shift_x, img.shape[1])
+        ymin, ymax = max(0, shift_y), min(img.shape[0]+shift_y, img.shape[0])
+        mask = np.ones(img.shape, dtype=bool)
+        mask[ymin:ymax, xmin:xmax] = False
+        shifted_map[mask] = np.NaN
+        return shifted_map
 
 
     def __calculate_movement(self, map1, map2):
@@ -112,7 +116,7 @@ class CloudTracker:
         # shift the image and calculate the overlap value
         for shift_x in np.arange(-map1.shape[0]//2//2 , map1.shape[0]//2//2, max([map1.shape[0]//20, 1])):
             for shift_y in np.arange(-map1.shape[1]//2//2 , map1.shape[1]//2//2, max([map1.shape[1]//20, 1])):
-                shifted_map = self.__crop_shifted(map2, shift_x, shift_y)
+                shifted_map = self.__shift_and_crop(map2, shift_x, shift_y)
                 temp = np.nanmean((map1 - shifted_map)**2)
                 if temp < minVal:
                     minVal = temp
@@ -145,18 +149,32 @@ class CloudTracker:
         plt.savefig('cloud_movement.png') 
         plt.show()
 
-    # update detects clouds in cloudmap and updates old cloud positions
+    def predict_next_cloudmap(self, wind_x, wind_y, prev_map):
+        '''
+        Predict next cloud map by shifting the previous map in wind direction and filling empty pixels
+        with values from previous map.
+        '''
+        shifted_map = self.__shift_and_crop(prev_map, wind_x, wind_y)
+        wind_speed = np.sqrt(wind_x**2+wind_y**2)
+        wind_steps = wind_speed//self.config['image']['radius']
+        shifted_map[np.isnan(shifted_map)] = prev_map[np.isnan(shifted_map)]
+        self.pred_map.append(shifted_map)
+
     def update(self, cloudmap, timestamp):
+        '''
+        Update the cloud tracker.
+        Insert new cloudmap and timestamp and the cloud tracker will calculate wind speed/direction
+        and predict the next cloud map for you.
+        '''
         print('update')
         self.log.debug('Update')
         # store projection of clouds on atmosphere
-        self.__add_cloud(cloudmap)
-        self.timestamps.append(timestamp)
+        self.__add_cloud(cloudmap, timestamp)
 
         if len(self.maps) > 1:
             direct, val = self.__calculate_movement(self.trans_maps[-1], self.trans_maps[-2])
             self.wind_direction.append(direct)
-            self.pred_map.append(self.__crop_shifted(self.trans_maps[-2], self.wind_direction[-1][0], self.wind_direction[-1][1]))
+            self.predict_next_cloudmap(direct[0], direct[1], self.trans_maps[-1])
 
         # drop oldest value if more than max_maps are in memory
         if (len(self.maps) > self.max_maps):
