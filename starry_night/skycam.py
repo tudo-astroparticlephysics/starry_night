@@ -746,8 +746,8 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     
     input:
         filename: full or relativ path to image
-        crop: crop image to a circle with center and radius
-        fmt: format timestring like 'gtc_allskyimage_%Y%m%d_%H%M%S.jpg'
+        crop: Config section 'crop' defines circles with center and radius
+        fmt: timestamp format string. Example: 'gtc_allskyimage_%Y%m%d_%H%M%S.jpg'
             used for parsing the date from filename
     Returns: Dictionary with image array and timestamp datetime object
     '''
@@ -757,22 +757,40 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     filename = filepath.split('/')[-1].split('.')[0]
     filetype= filepath.split('.')[-1]
 
-    # read mat file
+    # is it a matlab file?
     if filetype == 'mat':
         data = matlab.loadmat(filepath)
         img = data['pic1']
-        time = datetime.strptime(
-            data['UTC1'][0], '%Y/%m/%d %H:%M:%S'
-        )
+        if config['properties']['timeKey']:
+            time = datetime.strptime(
+                data[config['properties']['timeKey']][0],
+                config['properties']['timeformat']
+            )
+        else:
+            time = datetime.strptime(
+                filename,
+                config['properties']['timeformat'],
+                )
 
-    # read fits file
+    # is it a fits file?
     elif (filetype == 'fits') or (filetype == 'gz'):
         hdulist = fits.open(filepath, ignore_missing_end=True)
         img = hdulist[0].data
-        time = datetime.strptime(
-            hdulist[0].header['TIMEUTC'],
-            '%Y-%m-%d %H:%M:%S'
-        )
+        try:
+            if config['properties']['timeKey']:
+                time = datetime.strptime(
+                    hdulist[0].header[config['properties']['timeKey']],
+                    config['properties']['timeformat'],
+                    )
+            else:
+                time = datetime.strptime(
+                    filename,
+                    config['properties']['timeformat'],
+                    )
+        except ValueError as e:
+            log.error('Error parsing timestamp: {}'.format(e))
+            return
+
     else:
         # read normal image file
         try:
@@ -790,9 +808,9 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             fmt = (config['properties']['timeformat'] if fmt is None else fmt)
             log.error('{},{}'.format(filename,filepath))
             log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
-            raise
-            sys.exit(1)
+            return
     time += timedelta(minutes=float(config['properties']['timeoffset']))
+    img = img.astype('float32') #needs to be float because we want to set some values NaN while cropping
     return dict({'img': img, 'timestamp': time})
 
 def update_crop_moon(crop_mask, moon, conf):

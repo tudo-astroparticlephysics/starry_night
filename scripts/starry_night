@@ -65,8 +65,12 @@ from tables import HDF5ExtError
 from starry_night import skycam, cloud_tracker
 from IPython import embed
 
+#######################################################
+
 def wrapper(const_celestialObjects, config, args, img):
     return skycam.process_image(skycam.getImageDict(img, config), const_celestialObjects, config, args)
+
+
 
 __version__ = pkg_resources.require('starry_night')[0].version
 directory = os.path.join(os.environ['HOME'], '.starry_night')
