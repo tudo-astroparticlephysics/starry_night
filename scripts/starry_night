@@ -45,7 +45,6 @@ import time
 import numpy as np
 import pandas as pd
 import configparser
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import skimage.filters
 from matplotlib import rc, cm
@@ -238,6 +237,9 @@ def main(args):
     imgCount = len(results)
     log.info('{} images were processed successfully.'.format(imgCount))
 
+
+    #####################################################
+
     # no more processing if no images were processed successfully
     if len(results) <= 5:
         log.info('Stop because only {} image(s) were processed. And we don\'t have enough data for further steps.'.format(len(results)))
@@ -267,7 +269,22 @@ def main(args):
 
     # we need a big data set for averaging, so only stars with > 10 data points are allowed
     df.reset_index(inplace=True)
-    df = df.groupby('HIP').filter(lambda x : len(x.index) > 10)
+    #df = df.groupby('HIP').filter(lambda x : len(x.index) > 10)
+
+
+    #####################################################
+
+    if args['--kernel']:
+        if imgCount == 1:
+            gr = df.groupby('HIP')
+            res = list()
+            for i, stars in gr:
+                res.append(stars.query('response_orig == {}'.format(stars.response_orig.max()))[['HIP','vmag','kernel','response']].values)
+            b = np.array(res)
+            plt.plot(b[:,0,0],b[:,0,2])
+            plt.show()
+
+
 
     if args['--airmass']:
         '''

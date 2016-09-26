@@ -1,9 +1,9 @@
 from starry_night import sql
 import pandas as pd
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib import rc, cm
+from matplotlib.lines import Line2D
 from mpl_toolkits.axes_grid.inset_locator import inset_axes
 
 import ephem
@@ -12,6 +12,7 @@ from time import sleep
 
 from astropy.io import fits
 from astropy.time import Time
+from astropy.convolution import convolve, convolve_fft
 from scipy.io import matlab
 from scipy.ndimage.measurements import label
 from io import BytesIO
@@ -36,7 +37,14 @@ from IPython import embed
 
 
 def LoG(x,y,sigma):
-    return 1/(np.pi*sigma**4)*(1-(x**2+y**2)/(2*sigma**2))*np.exp(-(x**2+y**2)/(2*sigma**2))
+    '''
+    Return discretized Laplacian of Gaussian kernel.
+    Mean = 0 normalized and scale invarian by multiplying with sigma**2
+    '''
+
+    kernel = 1/(np.pi*sigma**4)*(1-(x**2+y**2)/(2*sigma**2))*np.exp(-(x**2+y**2)/(2*sigma**2))
+    kernel -= np.mean(kernel)
+    return kernel * sigma**2
 
 def lin(x,m,b):
     return m*x+b
@@ -966,7 +974,7 @@ def calc_cloud_map(stars, rng, img_shape, weight=False):
 
 def filter_catalogue(catalogue, rng):
     '''
-    Loop through all possible pairs of stars and remove less bright star if distance is < rng
+    Check for every star if it has a brighter neighbor. If yes, remove the star, otherwise keep it
 
     Input:  catalogue - Pandas dataframe (ra and dec in degree)
             rng - Min distance between stars in degree
@@ -974,24 +982,43 @@ def filter_catalogue(catalogue, rng):
     Returns: List of indexes that remain in catalogue
     '''
     log = logging.getLogger(__name__)
+    c = pd.read_csv(
+            catalogue,
+            sep=';',
+            comment='#',
+            header=0,
+            skipinitialspace=True,
+            na_values=[' ',''],
+        )
+    # keep stars with varflag < 2 or varflag == NaN
+    # these stars have a vmag fluctuation < 0.06mag
+    c.query('VarFlag <2 | VarFlag!=VarFlag', inplace=True)
+    c.index = c.HIP
+
     try:
-        c = catalogue.sort_values('vmag', ascending=True)
-        reference = np.deg2rad(c[['ra','dec']].values)
-        index = c.index
+        c.sort_values('vmag', ascending=False, inplace=True)
+        positionList = list(np.deg2rad(c[['ra','dec']].values))
+        indexList = list(c.index.values)
     except KeyError:
         log.error('Key not found. Please check that your catalogue is labeled correctly')
         raise
     
-    i1 = 0 #star index that is used as filter base
-    while i1 < len(reference)-1:
-        print('Items left: {}/{}'.format(i1,len(reference)-1))
-        deltaDeg = np.rad2deg(2*np.arcsin(np.sqrt(np.sin((reference[i1,1]-reference[:,1])/2)**2 + np.cos(reference[i1,1])*np.cos(reference[:,1])*np.sin((reference[i1,0]-reference[:,0])/2)**2)))
-        keep = deltaDeg > rng
-        keep[:i1+1] = True #don't remove stars that already passed the filter
-        reference = reference[keep]
-        index = index[keep]
-        i1+=1
-    return index
+    i1 = 0 #index of star that will be checked
+    while i1 < len(positionList)-1:
+        if i1 % 10 == 0:
+            print('Items left: {} of {}'.format(i1-len(positionList), len(c.index.values)))
+        # calculate distance to all brighter stars
+        positions = np.array(positionList[i1+1:])
+        deltaDeg = np.rad2deg(2*np.arcsin(np.sqrt(np.sin((positionList[i1][1]-positions[:,1])/2)**2 +
+            np.cos(positionList[i1][1])*np.cos(positions[:,1])*np.sin((positionList[i1][0]-positions[:,0])/2)**2)))
+        # remove = True if any brighter star is closer than rng
+        remove = np.sum(deltaDeg < float(rng)) > 0
+        if remove:
+            positionList.pop(i1)
+            indexList.pop(i1)
+        else:
+            i1+=1
+    return indexList
 
 
 def process_image(images, data, config, args):
@@ -1021,8 +1048,8 @@ def process_image(images, data, config, args):
     sun.compute(observer)
     moon = ephem.Moon()
     moon.compute(observer)
-    if np.rad2deg(sun.alt) > -10:
-        log.info('Sun too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
+    if np.rad2deg(sun.alt) > -15:
+        log.info('Sun too high: {}° above horizon. We start below -15°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
         return 
     if args['--moon']:
         if np.rad2deg(moon.alt) > -10:
@@ -1056,8 +1083,8 @@ def process_image(images, data, config, args):
     
     # calculate response of stars with image kernel
     if args['--kernel']:
-        kernelSize = float(args['--kernel']),
-        #np.arange(1, int(args['--kernel'])+1, 5)
+        #kernelSize = float(args['--kernel']),
+        kernelSize = np.arange(1, float(args['--kernel'])+0.1, 0.1)
         stars_orig = stars.copy()
     else:
         kernelSize = [float(config['analysis']['kernelsize'])]
@@ -1070,30 +1097,34 @@ def process_image(images, data, config, args):
         if len(kernelSize) > 1:
             stars = stars_orig.copy()
         stars['kernel'] = k
+    
+        # prepare LoG kernel
+        x,y = np.meshgrid(range(int(np.floor(-3*k)), int(np.ceil(3*k+1))), range(int(np.floor(-3*k)), int(np.ceil(3*k+1))))
+        LoG_kernel = LoG(x, y, k)
 
-        gauss = skimage.filters.gaussian(img, sigma=k)
-
-        # chose the response function
+        # chose the response function and apply it to the image
+        # result will be stored as 'resp'
         if args['--function'] == 'All' or args['--ratescan']:
             grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
-            sobel = skimage.filters.sobel(img).clip(min=0)
-            lap = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+            sobel = convolve(img, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(img, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
+            log = convolve_fft(img, LoG_kernel)
 
             grad[crop_mask] = np.NaN
             sobel[crop_mask] = np.NaN
-            lap[crop_mask] = np.NaN
+            log[crop_mask] = np.NaN
+
             images['grad'] = grad
             images['sobel'] = sobel
-            images['lap'] = lap
-            resp = lap
+            images['log'] = log
+            resp = log
         elif args['--function'] == 'DoG':
             resp = skimage.filters.gaussian(img, sigma=k) - skimage.filters.gaussian(img, sigma=1.6*k)
         elif args['--function'] == 'LoG':
-            resp = skimage.filters.laplace(gauss, ksize=3).clip(min=0)
+            resp = convolve_fft(img, LoG_kernel)
         elif args['--function'] == 'Grad':
             resp = ((img - np.roll(img, 1, axis=0)).clip(min=0))**2 + ((img - np.roll(img, 1, axis=1)).clip(min=0))**2
         elif args['--function'] == 'Sobel':
-            resp = skimage.filters.sobel(img).clip(min=0)
+            resp = convolve(img, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(img, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
         else:
             log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
             sys.exit(1)
@@ -1118,8 +1149,8 @@ def process_image(images, data, config, args):
 
         # calculate response and drop stars that were not found at all, because response=0 interferes with log-plot
         stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
-        stars['response_mean'] = stars.apply(lambda s : findLocalMean(img, s.x, s.y, 50), axis=1)
-        stars['response_std'] = stars.apply(lambda s : findLocalStd(img, s.x, s.y, 50), axis=1)
+        #stars['response_mean'] = stars.apply(lambda s : findLocalMean(img, s.x, s.y, 50), axis=1)
+        #stars['response_std'] = stars.apply(lambda s : findLocalStd(img, s.x, s.y, 50), axis=1)
         stars.query('response > 1e-100', inplace=True)
 
         # correct atmospherice absorbtion
@@ -1155,6 +1186,9 @@ def process_image(images, data, config, args):
 
         # append results
         kernelResults.append(stars)
+
+
+
     del stars
     try:
         del stars_orig
@@ -1168,7 +1202,7 @@ def process_image(images, data, config, args):
         celObjects['stars'] = kernelResults[0]
 
     # use 'stars' as substitution because it is shorter
-    celObjects['stars'].reset_index(0, drop=True, inplace=True)
+    celObjects['stars'].reset_index(0, inplace=True)
     stars = celObjects['stars']
 
     if len(kernelSize) == 1:
@@ -1184,6 +1218,33 @@ def process_image(images, data, config, args):
     ##################################
     # processing done. Now plot everything
     ##################################
+
+    if args['--kernel']:
+        embed()
+        del gr
+        gr = stars.query('kernel>=1').reset_index().groupby('HIP')
+        ax = plt.figure().add_subplot(111)
+        for i, s in gr:
+            if s.vmag.max() > 4.:
+                continue
+            n = s.response_orig.max()
+            plt.plot(s.kernel.values, s.response_orig.values/n, marker='o')
+        ax.set_xlim(0., 5.1)
+        ax.set_ylim(0, 1.1)
+        ax.set_xlabel('$\sigma$ of LoG filter')
+        ax.set_ylabel('Kernel response normalized')
+        lEntry = Line2D([], [], color='black', marker='o', markersize=6, label='Response of all stars')
+        ax.grid()
+        ax.legend(handles=[lEntry])
+        plt.show()
+
+        if args['-s']:
+            plt.savefig('chose_sigma_{}.png'.format(config['properties']['name']))
+        if args['-v']:
+            plt.show()
+        plt.close('all')
+        del res, gr
+
 
     if args['--cam'] or args['--daemon']:
         output['img'] = img
@@ -1263,42 +1324,53 @@ def process_image(images, data, config, args):
             plt.close('all')
 
         if args['--ratescan']:
+            embed()
             log.info('Doing ratescan')
             gradList = list()
             sobelList = list()
-            lapList = list()
+            logList = list()
 
-            response = np.logspace(-4.5,-0.5,200)
-            for resp in response:
-                labeled, labelCnt = label(grad>resp)
-                stars['visible'] = stars.response_grad > resp
-                gradList.append((calc_star_percentage(0, stars, -1), np.sum(grad > resp), labelCnt, sum(stars.visible)))
-                labeled, labelCnt = label(sobel>resp)
-                stars['visible'] = stars.response_sobel > resp
-                sobelList.append((calc_star_percentage(0, stars, -1), np.sum(sobel > resp), labelCnt, sum(stars.visible)))
-                labeled, labelCnt = label(lap>resp)
-                stars['visible'] = stars.response > resp
-                lapList.append((calc_star_percentage(0, stars, -1), np.sum(lap > resp), labelCnt, sum(stars.visible)))
+            for resp_grad, resp_sobel, resp_log in zip(np.logspace(np.log10(stars.response_grad.min()/5), np.log10(stars.response_grad.max()), 100),
+                        np.logspace(np.log10(stars.response_sobel.min()), np.log10(stars.response_sobel.max()), 100),
+                        np.logspace(np.log10(stars.response_orig.min()), np.log10(stars.response_orig.max()), 100)):
+
+                _, num_of_clusters = label(grad>resp_grad)
+                size_of_clusters = np.sum(grad>resp_grad)/num_of_clusters
+                perc_of_vis_stars = np.mean(stars.response_grad > resp_grad)
+                gradList.append((resp_grad, num_of_clusters, size_of_clusters, perc_of_vis_stars))
+
+                _, num_of_clusters = label(sobel>resp_sobel)
+                size_of_clusters = np.sum(grad>resp_sobel)/num_of_clusters
+                perc_of_vis_stars = np.mean(stars.response_sobel > resp_sobel)
+                sobelList.append((resp_sobel, num_of_clusters, size_of_clusters, perc_of_vis_stars))
+
+                _, num_of_clusters = label(log>resp_log)
+                size_of_clusters = np.sum(log>resp_log)/num_of_clusters
+                perc_of_vis_stars = np.mean(stars.response_orig > resp_log)
+                logList.append((resp_log, num_of_clusters, size_of_clusters, perc_of_vis_stars))
+
 
             gradList = np.array(gradList)
             sobelList = np.array(sobelList)
-            lapList = np.array(lapList)
+            logList = np.array(logList)
 
-            #minThresholds = [max(response[l[:,0]==1]) for l in (gradList, sobelList, lapList)]
+            #minThresholds = [max(response[l[:,0]==1]) for l in (gradList, sobelList, logList)]
 
-            minThresholds = -np.array([np.argmax(gradList[::-1,0]), np.argmax(sobelList[::-1,0]), np.argmax(lapList[::-1,0])]) + len(response) -1
-            clusters = (gradList[minThresholds[0],2], sobelList[minThresholds[1],2], lapList[minThresholds[2],2])
-            thresh = (response[minThresholds[0]], response[minThresholds[1]],response[minThresholds[2]])
+            # find minimal threshold for detecting 100% of all stars and number of clusters at that threshold
+            minThresholdPos = -np.array([np.argmax(gradList[::-1,0]), np.argmax(sobelList[::-1,0]), np.argmax(logList[::-1,0])]) + len(response) -1
+            thresh = (response[minThresholdPos[0]], response[minThresholdPos[1]],response[minThresholdPos[2]])
+            clusters = (gradList[minThresholdPos[0],2], sobelList[minThresholdPos[1],2], logList[minThresholPods[2],2])
+
             fig = plt.figure(figsize=(19.2,10.8))
             ax1 = fig.add_subplot(111)
             plt.xscale('log')
             plt.grid()
             ax1.plot(response, sobelList[:,0], marker='x', c='blue', label='Sobel Kernel - Percent')
-            ax1.plot(response, lapList[:,0], marker='x', c='red', label='LoG Kernel - Percent')
+            ax1.plot(response, logList[:,0], marker='x', c='red', label='log Kernel - Percent')
             ax1.plot(response, gradList[:,0], marker='x', c='green', label='Square Gradient - Percent')
-            ax1.axvline(response[minThresholds[0]], color='green')
-            ax1.axvline(response[minThresholds[1]], color='blue')
-            ax1.axvline(response[minThresholds[2]], color='red')
+            ax1.axvline(response[minThresholdPos[0]], color='green')
+            ax1.axvline(response[minThresholdPos[1]], color='blue')
+            ax1.axvline(response[minThresholdPos[2]], color='red')
             ax1.axvline(14**2/255**2, color='black', label='old threshold')
             ax1.set_ylabel('')
             ax1.legend(loc='center left')
@@ -1306,13 +1378,13 @@ def process_image(images, data, config, args):
             ax2 = ax1.twinx()
             #ax2.plot(response, gradList[:,1], marker='o', c='green', label='Square Gradient - Pixcount')
             #ax2.plot(response, sobelList[:,1], marker='o', c='blue', label='Sobel Kernel - Pixcount')
-            #ax2.plot(response, lapList[:,1], marker='o', c='red', label='LoG Kernel - Pixcount')
+            #ax2.plot(response, logList[:,1], marker='o', c='red', label='log Kernel - Pixcount')
             ax2.plot(response, gradList[:,2], marker='s', c='green', label='Square Gradient - Clustercount')
             ax2.plot(response, sobelList[:,2], marker='s', c='blue', label='Sobel Kernel - Clustercount')
-            ax2.plot(response, lapList[:,2], marker='s', c='red', label='LoG Kernel - Clustercount')
-            ax2.axhline(gradList[minThresholds[0],2], color='green')
-            ax2.axhline(sobelList[minThresholds[1],2], color='blue')
-            ax2.axhline(lapList[minThresholds[2],2], color='red')
+            ax2.plot(response, logList[:,2], marker='s', c='red', label='log Kernel - Clustercount')
+            ax2.axhline(gradList[minThresholdPos[0],2], color='green')
+            ax2.axhline(sobelList[minThresholdPos[1],2], color='blue')
+            ax2.axhline(logList[minThresholdPos[2],2], color='red')
             ax2.legend(loc='upper right')
             ax2.set_xlim((min(response), max(response)))
             ax2.set_ylim((0,16000))
@@ -1327,7 +1399,7 @@ def process_image(images, data, config, args):
             output['minThresh'] = minThresholds
             del grad
             del sobel
-            del lap
+            del log
 
     if args['--cloudmap'] or args['--cloudtrack'] or args['--daemon']:
         log.debug('Calculating cloud map')
