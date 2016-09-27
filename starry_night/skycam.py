@@ -36,6 +36,16 @@ import requests.exceptions as rex
 from IPython import embed
 
 
+def degDist(ra1, ra2, dec1, dec2):
+    '''
+    Returns angle between two points on a sphere.
+
+    Input: ra and dec in rad
+    Output: Angle in degree
+    '''
+    return np.rad2deg(2*np.arcsin(np.sqrt(np.sin((ra1-ra2)/2)**2 +
+        np.cos(ra1)*np.cos(ra2)*np.sin((dec1-dec2)/2)**2)))
+
 def LoG(x,y,sigma):
     '''
     Return discretized Laplacian of Gaussian kernel.
@@ -603,15 +613,9 @@ def update_star_position(data, observer, conf, crop, args):
 
     # calculate angle to moon
     log.debug('Calculate Angle to Moon')
-    stars['angleToMoon'] = np.arccos(np.sin(stars.altitude.values)*
-        np.sin(moon.alt) + np.cos(stars.altitude.values)*np.cos(moon.alt)*
-        np.cos((stars.azimuth.values - moon.az)))
-    planets['angleToMoon'] = np.arccos(np.sin(planets.altitude.values)*
-        np.sin(moon.alt) + np.cos(planets.altitude.values)*np.cos(moon.alt)*
-        np.cos((planets.azimuth.values - moon.az)))
-    points_of_interest['angleToMoon'] = np.arccos(np.sin(points_of_interest.altitude.values)*
-        np.sin(moon.alt) + np.cos(points_of_interest.altitude.values)*np.cos(moon.alt)*
-        np.cos((points_of_interest.azimuth.values - moon.az)))
+    stars['angleToMoon'] = degDist(stars.altitude.values, moon.alt, stars.azimuth.values, moon.az)
+    planets['angleToMoon'] = degDist(planets.altitude.values, moon.alt, planets.azimuth.values, moon.az)
+    points_of_interest['angleToMoon'] = degDist(points_of_interest.altitude.values, moon.alt, points_of_interest.azimuth.values, moon.az)
 
     # remove stars and planets that are too close to moon
     stars.query('angleToMoon > {}'.format(np.deg2rad(float(conf['analysis']['minAngleToMoon']))), inplace=True)
@@ -634,6 +638,11 @@ def update_star_position(data, observer, conf, crop, args):
     stars = stars[stars.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
     planets = planets[planets.apply(lambda p, crop=crop: ~crop[int(p['y']), int(p['x'])], axis=1)]
     points_of_interest = points_of_interest[points_of_interest.apply(lambda s, crop=crop: ~crop[int(s['y']), int(s['x'])], axis=1)]
+
+    # remove stars that are too close to planets because they are brighter and we will mistake them otherwise
+    tolerance = int(conf['analysis']['pixelTolerance'])
+    for i, pl in planets.iterrows():
+        stars.query('~(({} < x < {}) & ({} < y < {}))'.format(pl.x-tolerance, pl.x+tolerance, pl.y-tolerance, pl.y+tolerance), inplace=True) 
 
     return {'stars':stars, 'planets':planets, 'points_of_interest': points_of_interest, 'moon': moonData, 'sun': sunData, 'lidar': magicLidar_now}
 
@@ -992,7 +1001,9 @@ def filter_catalogue(catalogue, rng):
         )
     # keep stars with varflag < 2 or varflag == NaN
     # these stars have a vmag fluctuation < 0.06mag
+    # also remove stars darker than mag=10
     c.query('VarFlag <2 | VarFlag!=VarFlag', inplace=True)
+    c.query('vmag < 10', inplace=True)
     c.index = c.HIP
 
     try:
@@ -1003,22 +1014,24 @@ def filter_catalogue(catalogue, rng):
         log.error('Key not found. Please check that your catalogue is labeled correctly')
         raise
     
+    popped = 0 #count popped stars
     i1 = 0 #index of star that will be checked
     while i1 < len(positionList)-1:
-        if i1 % 10 == 0:
-            print('Items left: {} of {}'.format(i1-len(positionList), len(c.index.values)))
+        if popped % 50 == 0:
+            print('Left to process / size of filtered catalogue: {} / {}'.format(len(positionList)-i1, len(positionList)))
         # calculate distance to all brighter stars
         positions = np.array(positionList[i1+1:])
-        deltaDeg = np.rad2deg(2*np.arcsin(np.sqrt(np.sin((positionList[i1][1]-positions[:,1])/2)**2 +
-            np.cos(positionList[i1][1])*np.cos(positions[:,1])*np.sin((positionList[i1][0]-positions[:,0])/2)**2)))
+        deltaDeg = degDist(positionList[i1][1], positions[:,1], positionList[i1][0], positions[:,0])
         # remove = True if any brighter star is closer than rng
         remove = np.sum(deltaDeg < float(rng)) > 0
         if remove:
             positionList.pop(i1)
             indexList.pop(i1)
+            popped += 1
         else:
             i1+=1
-    return indexList
+    print('Catalogue had {} entries, {} remain after filtering'.format(len(c.index), len(indexList)))
+    return c.ix[indexList]
 
 
 def process_image(images, data, config, args):
@@ -1132,10 +1145,12 @@ def process_image(images, data, config, args):
         images['response'] = resp
 
 
-        # tolerance is max distance between actual star position and expected star position
-        # this should be a little smaller than 1° because this is the minimum distance
-        # between 2 catalogue stars (catalogue was filtered for this)
-        tolerance = np.max([0, int((float(config['image']['radius'])/90-1)/2)])
+        # to correct abberation the max filter response withing tolerance distance around a star will be chosen as 'real' star position 
+        # there should be no need for this to be bigger than the diameter of the bigger stars because this means that the transformation we use is quite bad
+        # and a bright star next to the real star might be detected by error
+        
+
+        tolerance = int(config['analysis']['pixelTolerance'])
         log.debug('Calculate Filter response')
         
         # calculate x and y position where response has its max value (search within 'tolerance' range)
@@ -1220,7 +1235,6 @@ def process_image(images, data, config, args):
     ##################################
 
     if args['--kernel']:
-        embed()
         del gr
         gr = stars.query('kernel>=1').reset_index().groupby('HIP')
         ax = plt.figure().add_subplot(111)
@@ -1289,7 +1303,7 @@ def process_image(images, data, config, args):
 
             stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values,
                     cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
-            ax.set_xlim((-1, float(config['analysis']['vmaglimit'])+0.5))
+            ax.set_xlim((-1, float(data['vmaglimit'])+0.5))
             ax.set_ylim((
                     10**(llim[0]*float(config['analysis']['vmaglimit'])+llim[1]),
                     10**(ulim[0]*-1+ulim[1])
@@ -1324,7 +1338,6 @@ def process_image(images, data, config, args):
             plt.close('all')
 
         if args['--ratescan']:
-            embed()
             log.info('Doing ratescan')
             gradList = list()
             sobelList = list()
