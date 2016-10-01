@@ -2,7 +2,7 @@ from starry_night import sql
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import rc, cm
+from matplotlib import rc, cm, gridspec, ticker
 from matplotlib.lines import Line2D
 from mpl_toolkits.axes_grid.inset_locator import inset_axes
 
@@ -15,6 +15,7 @@ from astropy.time import Time
 from astropy.convolution import convolve, convolve_fft
 from scipy.io import matlab
 from scipy.ndimage.measurements import label
+from scipy.optimize import curve_fit
 from io import BytesIO
 from skimage.io import imread
 from skimage.color import rgb2gray
@@ -38,7 +39,8 @@ from IPython import embed
 
 def degDist(ra1, ra2, dec1, dec2):
     '''
-    Returns angle between two points on a sphere.
+    Haversine formula.
+    Returns great circle distance between two points on a sphere in degree.
 
     Input: ra and dec in rad
     Output: Angle in degree
@@ -58,6 +60,9 @@ def LoG(x,y,sigma):
 
 def lin(x,m,b):
     return m*x+b
+
+def expo(x,m,b):
+    return np.exp(m*x+b)
 
 def transmission(x, a, c):
     '''
@@ -776,24 +781,28 @@ def getImageDict(filepath, config, crop=None, fmt=None):
 
     # is it a matlab file?
     if filetype == 'mat':
-        data = matlab.loadmat(filepath)
-        img = data['pic1']
-        if config['properties']['timeKey']:
-            time = datetime.strptime(
-                data[config['properties']['timeKey']][0],
-                config['properties']['timeformat']
-            )
-        else:
-            time = datetime.strptime(
-                filename,
-                config['properties']['timeformat'],
+        try:
+            data = matlab.loadmat(filepath)
+            img = data['pic1']
+            if config['properties']['timeKey']:
+                time = datetime.strptime(
+                    data[config['properties']['timeKey']][0],
+                    config['properties']['timeformat']
                 )
+            else:
+                time = datetime.strptime(
+                    filename,
+                    config['properties']['timeformat'],
+                    )
+        except (KeyError,ValueError,OSError, FileNotFoundError) as e:
+            log.error('Failed to open image {}: {}'.format(filepath, e))
+            return
 
     # is it a fits file?
     elif (filetype == 'fits') or (filetype == 'gz'):
-        hdulist = fits.open(filepath, ignore_missing_end=True)
-        img = hdulist[0].data
         try:
+            hdulist = fits.open(filepath, ignore_missing_end=True)
+            img = hdulist[0].data
             if config['properties']['timeKey']:
                 time = datetime.strptime(
                     hdulist[0].header[config['properties']['timeKey']],
@@ -804,8 +813,8 @@ def getImageDict(filepath, config, crop=None, fmt=None):
                     filename,
                     config['properties']['timeformat'],
                     )
-        except ValueError as e:
-            log.error('Error parsing timestamp: {}'.format(e))
+        except (ValueError, KeyError,OSError,FileNotFoundError) as e:
+            log.error('Error parsing timestamp of {}: {}'.format(filepath, e))
             return
 
     else:
@@ -1097,7 +1106,7 @@ def process_image(images, data, config, args):
     # calculate response of stars with image kernel
     if args['--kernel']:
         #kernelSize = float(args['--kernel']),
-        kernelSize = np.arange(1, float(args['--kernel'])+0.1, 0.1)
+        kernelSize = np.round(np.arange(1, float(args['--kernel'])+0.1, 0.1),1)
         stars_orig = stars.copy()
     else:
         kernelSize = [float(config['analysis']['kernelsize'])]
@@ -1235,14 +1244,16 @@ def process_image(images, data, config, args):
     ##################################
 
     if args['--kernel']:
-        del gr
-        gr = stars.query('kernel>=1').reset_index().groupby('HIP')
+        embed()
+        res = list()
+        gr = stars.query('kernel>=1 & vmag<4').reset_index().groupby('HIP')
         ax = plt.figure().add_subplot(111)
-        for i, s in gr:
-            if s.vmag.max() > 4.:
-                continue
+        color = cm.jet(np.linspace(0,1,10 * (gr.vmag.max().max()-gr.vmag.min().min())+2 ))
+        for _, s in gr:
+            # normalize
             n = s.response_orig.max()
-            plt.plot(s.kernel.values, s.response_orig.values/n, marker='o')
+            res.append(s.query('response_orig == {}'.format(n)).kernel.values)
+            plt.plot(s.kernel.values, s.response_orig.values/n, marker='o', c=color[round(s.vmag.max()*10)])
         ax.set_xlim(0., 5.1)
         ax.set_ylim(0, 1.1)
         ax.set_xlabel('$\sigma$ of LoG filter')
@@ -1250,8 +1261,40 @@ def process_image(images, data, config, args):
         lEntry = Line2D([], [], color='black', marker='o', markersize=6, label='Response of all stars')
         ax.grid()
         ax.legend(handles=[lEntry])
-        plt.show()
+        if args['-s']:
+            plt.savefig('kernel_curve_{}.png'.format(config['properties']['name']))
+        if args['-v']:
+            plt.show()
+        plt.close('all')
 
+
+        gr = stars.query('kernel>=1 & vmag<4').reset_index().groupby('kernel')
+        res = list()
+        fig = plt.figure(figsize=(16,10))
+        plt.grid()
+        gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
+        ax = plt.subplot(gs[0])
+        for _, s in gr:
+            # dont plot feint stars
+            popt, pcov = curve_fit(expo, s.vmag.values, s.response_orig.values)
+            res.append((s.kernel.max(),*popt, np.sqrt(pcov[0,0]), np.sqrt(pcov[1,1])))
+        res = np.array(res)
+        ax.scatter(res[:,0],res[:,2], label='b')
+        ax.set_xlabel('$\sigma$ of LoG filter')
+        ax.set_ylabel('b')
+        ax.get_xaxis().set_minor_locator(ticker.AutoMinorLocator())
+        ax.grid(b=True, which='major')
+        ax.grid(b=True, which='minor')
+        ax2 = plt.subplot(gs[1], sharex=ax)
+        ax2.scatter(res[:,0],res[:,4], label='b')
+        ax2.set_ylabel('Standard deviation')
+        ax2.set_xlim((kernelSize[0]*0.9, kernelSize[-1]+.1))
+        ax2.set_ylim((np.min(res[:,4])*0.95, np.max(res[:,4])*1.08))
+        ax2.get_xaxis().set_minor_locator(ticker.AutoMinorLocator())
+        ax2.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+        ax2.grid(b=True, which='major')
+        ax2.grid(b=True, which='minor')
+        plt.tight_layout()
         if args['-s']:
             plt.savefig('chose_sigma_{}.png'.format(config['properties']['name']))
         if args['-v']:
