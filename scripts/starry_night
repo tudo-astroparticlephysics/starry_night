@@ -17,6 +17,7 @@ Options:
     --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG', 'All')
                     Using option '--ratescan' implies 'LoG'. [default: LoG]
     --vmag=<v>      Set custom magnitude limit.
+    --threads=<t>   Set number of threads for multiprocessing. Can not spawn more threads than cores. [Default: 4]
     --moon          Stop processing if moon above -10° altitude.
 
     --cam           Display camera image
@@ -49,7 +50,7 @@ import matplotlib.pyplot as plt
 import skimage.filters
 from matplotlib import rc, cm
 from datetime import datetime, timedelta
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 from functools import partial
 from scipy.optimize import curve_fit
 from re import split
@@ -235,7 +236,8 @@ def main(args):
             for img in args['<image>']:
                 results.append(par(img))
         else:
-            pool = Pool(maxtasksperchild=50)
+            threads = np.min([int(args['--threads']), cpu_count()])
+            pool = Pool(processes=threads, maxtasksperchild=50)
             results = pool.map(par, args['<image>'])
             pool.close()
             pool.join()
