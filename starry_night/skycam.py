@@ -1056,7 +1056,6 @@ def process_image(images, data, configList, args):
     if not images:
         return
 
-    embed()
     config = None
     for i in range(len(configList)):
         if np.datetime64(configList[i]['properties']['useConfAfter']) < np.datetime64(images['timestamp']):

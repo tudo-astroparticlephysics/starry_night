@@ -66,8 +66,8 @@ from IPython import embed
 
 #######################################################
 
-def wrapper(const_celestialObjects, config, args, img):
-    return skycam.process_image(skycam.getImageDict(img, config), const_celestialObjects, config, args)
+def wrapper(const_celestialObjects, configList, args, img):
+    return skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
 
 
 
@@ -123,7 +123,11 @@ def main(args):
             if args['-c'] in f:
                 log.debug('Opening config file: {}'.format(os.path.join(root,f)))
                 configList.append(configparser.RawConfigParser())
-                conf_succ += len(configList[-1].read(os.path.join(root,f)))
+                try:
+                    conf_succ += len(configList[-1].read(os.path.join(root,f)))
+                except UnicodeDecodeError:
+                    log.error('Could not open conf file: {}'.format(os.path.join(root,f)))
+                    configList.pop(-1)
     # also check if config file was path to a config file somewhere else
     if conf_succ == 0 and os.path.isfile(args['-c']):
         configList.append(configparser.RawConfigParser())
