@@ -1043,7 +1043,7 @@ def filter_catalogue(catalogue, rng):
     return c.ix[indexList]
 
 
-def process_image(images, data, config, args):
+def process_image(images, data, configList, args):
     '''
     This function applies all calculations to an image and returns results as dict.
     For details read the comments below.
@@ -1056,11 +1056,27 @@ def process_image(images, data, config, args):
     if not images:
         return
 
+    embed()
+    config = None
+    for i in range(len(configList)):
+        if np.datetime64(configList[i]['properties']['useConfAfter']) < np.datetime64(images['timestamp']):
+            config = configList[i]
+        else:
+            # stop once a config file does not meet the condition. We assume that the config files are ordered
+            # such that the start times will be processed in ascending order
+            break
+    if config == None:
+        log.error('No config file with valid start date < {}'.format(images['timestamp']))
+        return
+    # choose config file:
+    #for c in configList:
+    #    if c['properties']['useConfAfter']
 
     log.info('Processing image taken at: {}'.format(images['timestamp']))
     observer = obs_setup(config['properties'])
     observer.date = images['timestamp']
     data['timestamp'] = images['timestamp']
+
 
     # stop processing if sun is too high or config file does not match
     if images['img'].shape[1]  != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):

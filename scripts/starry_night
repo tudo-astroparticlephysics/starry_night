@@ -113,21 +113,33 @@ def main(args):
         log.debug('started starry_night in debug mode')
         #print(args)
 
-    config = configparser.RawConfigParser()
-    log.debug('Parsing config file: {}'.format(args['-c']))
-    # configfile can be a filepath or a name of a predefined config file
-    if '.' in args['-c'] or '/' in args['-c']:
-        conf_succ = len(config.read(args['-c']))
-    else:
-        conf_succ = len(config.read(pkg_resources.resource_filename(
+    configList = list()
+    
+    conf_succ = 0
+    # try to open config file of package
+    path = pkg_resources.resource_filename('starry_night','data/')
+    for root, dirs, files in os.walk(path):
+        for f in sorted(files):
+            if args['-c'] in f:
+                log.debug('Opening config file: {}'.format(os.path.join(root,f)))
+                configList.append(configparser.RawConfigParser())
+                conf_succ += len(configList[-1].read(os.path.join(root,f)))
+    # also check if config file was path to a config file somewhere else
+    if conf_succ == 0 and os.path.isfile(args['-c']):
+        configList.append(configparser.RawConfigParser())
+        conf_succ += len(config.read(pkg_resources.resource_filename(
             'starry_night', 'data/{}_cam.config'.format(args['-c']))
         ))
-    # conf_succ != 0 if config was read successfully
+        log.debug('Parsing config file: {}'.format(args['-c']))
+
     if conf_succ == 0:
+        configList.clear()
         log.error('Unable to parse config file. Does the file exist?')
         sys.exit(1)
     del conf_succ
 
+    # use first config file, the other ones are only needed if the camera was moved
+    config = configList[0]
 
     # data is a container for global data and variables which do belong neither to config nor to args.
     # data will be passed to all threads and is available for the analysis
@@ -188,8 +200,7 @@ def main(args):
                 time.sleep(30)
                 continue
                 
-            #img['timestamp'] += timedelta(minutes=float(config['properties']['timeoffset']))
-            skycam.process_image(img, data, config, args)
+            skycam.process_image(img, data, configList, args)
             if not args['--daemon']:
                 break
 
@@ -212,7 +223,7 @@ def main(args):
         imgCount = len(args['<image>'])
 
         log.info('Processing {} images.'.format(imgCount))
-        par = partial(wrapper, data, config, args)
+        par = partial(wrapper, data, configList, args)
 
         # don't use multiprocessing in debug mode
         # process all images and store results
