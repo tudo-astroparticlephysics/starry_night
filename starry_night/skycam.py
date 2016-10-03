@@ -355,8 +355,8 @@ def find_matching_pos(img_timestamp, time_pos_list):
     Since the lidar operates all the time but we only take images every few minutes 
     we need to find out where the lidar was looking at that point in time when we took the image
     '''
-    # select measurements that were taken not later than 5 minutes before the image
-    subset = time_pos_list.query('1/24/60 * 5 < MJD - {} < 1/24/60*10'.format(img_timestamp)).sort_values('MJD')
+    # select measurements that were taken not more than 1 min after the image and not earlyer than 10min before the image
+    subset = time_pos_list.query('1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(img_timestamp)).sort_values('MJD')
     closest = subset[subset.MJD==subset.MJD.min()]
     return closest[['ra','dec']]
 
