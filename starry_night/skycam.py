@@ -19,6 +19,7 @@ from scipy.optimize import curve_fit
 from io import BytesIO
 from skimage.io import imread
 from skimage.color import rgb2gray
+from os import stat
 import skimage.filters
 import warnings
 
@@ -34,7 +35,42 @@ from hashlib import sha1
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError, InternalError
 import requests.exceptions as rex
+from functools import wraps
+import signal
+import errno
+
 from IPython import embed
+
+
+class TimeoutError(Exception):
+    pass
+
+def timeout(seconds=10, error_message=os.strerror(errno.ETIME)):
+    def decorator(func):
+        def _handle_timeout(signum, frame):
+            raise TimeoutError(error_message)
+
+        def wrapper(*args, **kwargs):
+            signal.signal(signal.SIGALRM, _handle_timeout)
+            signal.alarm(seconds)
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                signal.alarm(0)
+            return result
+
+        return wraps(func)(wrapper)
+
+    return decorator
+
+
+@timeout(5)
+def imread_timeout(filepath, mode, as_grey):
+    # sometimes imread freezes, so we need this to resume
+    try:
+        return imread(filepath, mode=mode, as_grey=as_grey)
+    except TimeoutError:
+        return
 
 
 def degDist(ra1, ra2, dec1, dec2):
@@ -779,6 +815,9 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     filename = filepath.split('/')[-1].split('.')[0]
     filetype= filepath.split('.')[-1]
 
+    if stat(filepath).st_size == 0:
+        log.error('Image has size 0, aborting!')
+        return
     # is it a matlab file?
     if filetype == 'mat':
         try:
@@ -1259,7 +1298,6 @@ def process_image(images, data, configList, args):
     ##################################
 
     if args['--kernel']:
-        embed()
         res = list()
         gr = stars.query('kernel>=1 & vmag<4').reset_index().groupby('HIP')
         ax = plt.figure().add_subplot(111)

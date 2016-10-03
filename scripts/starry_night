@@ -165,7 +165,7 @@ def main(args):
                 log.error('SQL connection failed! Aborting')
                 sys.exit(1)
             del engine
-        except OperationalError as e:
+        except (OperationalError,InternalError) as e:
             log.error(e)
             sys.exit(1)
     if not args['<image>']:
@@ -264,7 +264,6 @@ def main(args):
 
     if args['--low-memory']:
         log.info('Option \'low-memory\' was activated. No data for further processing')
-        embed()
         sys.exit(0)
     star_list = list(map(lambda x: x['stars'], results))
     timestamp_list = list(map(lambda x: x['timestamp'], results))
