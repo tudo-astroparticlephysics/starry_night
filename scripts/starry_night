@@ -68,7 +68,11 @@ from IPython import embed
 #######################################################
 
 def wrapper(const_celestialObjects, configList, args, img):
-    return skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
+    ret = skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
+    if not ret:
+        return -1
+    else:
+        return ret
 
 
 
