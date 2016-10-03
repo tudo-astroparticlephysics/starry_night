@@ -34,8 +34,8 @@ setup(
             'data/CTA_cam.config',
             'data/GTC_cam.config',
             'data/IceCube_cam.config',
-            'data/Magic1_cam.config',
-            'data/Magic2_cam.config',
+            'data/Magic_cam1.config',
+            'data/Magic_cam2.config',
             'data/example_sources.csv',
             ]
         },
