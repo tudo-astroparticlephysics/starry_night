@@ -50,7 +50,7 @@ import matplotlib.pyplot as plt
 import skimage.filters
 from matplotlib import rc, cm
 from datetime import datetime, timedelta
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, set_start_method
 from functools import partial
 from scipy.optimize import curve_fit
 from re import split
@@ -66,6 +66,7 @@ from starry_night import skycam, cloud_tracker
 from IPython import embed
 
 #######################################################
+set_start_method('forkserver')
 
 def wrapper(const_celestialObjects, configList, args, img):
     ret = skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
