@@ -418,7 +418,7 @@ def celObjects_dict(config):
     log = logging.getLogger(__name__)
     
     log.debug('Loading stars')
-    catalogue = resource_filename('starry_night', 'data/catalogue_10vmag_1degFilter.csv')
+    catalogue = resource_filename('starry_night', 'data/catalogue_10vmag_0.8degFilter.csv')
     try:
         stars = pd.read_csv(
             catalogue,

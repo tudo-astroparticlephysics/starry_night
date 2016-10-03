@@ -29,11 +29,13 @@ setup(
 
     package_data={
         'starry_night': [
-            'data/catalogue_10vmag_1degFilter.csv',
+            'data/catalogue_10vmag_1.0degFilter.csv',
+            'data/catalogue_10vmag_0.8degFilter.csv',
             'data/CTA_cam.config',
             'data/GTC_cam.config',
             'data/IceCube_cam.config',
-            'data/Magic_cam.config',
+            'data/Magic1_cam.config',
+            'data/Magic2_cam.config',
             'data/example_sources.csv',
             ]
         },
