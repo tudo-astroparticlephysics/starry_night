@@ -19,6 +19,7 @@ from scipy.optimize import curve_fit
 from io import BytesIO
 from skimage.io import imread
 from skimage.color import rgb2gray
+import os
 from os import stat
 import skimage.filters
 import warnings
@@ -859,7 +860,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     else:
         # read normal image file
         try:
-            img = imread(filepath, mode='L', as_grey=True)
+            img = imread_timeout(filepath, mode='L', as_grey=True)
         except (FileNotFoundError, OSError, ValueError) as e:
             log.error('Error reading file \'{}\': {}'.format(filename+'.'+filetype, e))
             return
