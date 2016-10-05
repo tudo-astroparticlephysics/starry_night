@@ -470,7 +470,7 @@ def celObjects_dict(config):
             index_col=None,
         )
     except OSError as e:
-        log.debug('File with points of interest not found: {} We will now check internal package files...'.format(e))
+        log.debug('File with points of interest not found: {}. We will now check internal package files...'.format(e))
         try:
             poi_filename = resource_filename('starry_night', join('data',config['analysis']['points_of_interest']))
             points_of_interest = pd.read_csv(
@@ -1541,7 +1541,7 @@ def process_image(images, data, configList, args):
     try:
         output['global_coverage'] = np.nanmean(cloudmap)
     except NameError:
-        log.warning('Cloudmap not available. Calculating global_coverage not possible')
+        log.debug('Cloudmap not available. Calculating global_coverage not possible')
         output['global_coverage'] = np.float64(-1)
 
     del images

@@ -57,7 +57,7 @@ from getpass import getpass
 from sqlalchemy import create_engine
 import os
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, InternalError
 import requests.exceptions as rex
 from tables import HDF5ExtError
 
@@ -210,6 +210,7 @@ def main(args):
 
     else:
         # use image(s) provided by the user and search for directories
+        # remove entries that are no valid files
         i = 0
         while len(args['<image>']) > i:
             if os.path.isdir(args['<image>'][i]):
@@ -218,7 +219,10 @@ def main(args):
                     for f in files:
                         args['<image>'].append(os.path.join(root,f))
             else:
-                i += 1
+                if os.path.isfile(args['<image>'][i]):
+                    i += 1
+                else:
+                    args['<image>'].pop(i)
 
         # no multiprocessing if only a single image was found
         if len(args['<image>']) == 1:
@@ -233,7 +237,10 @@ def main(args):
         # process all images and store results
         if args['--debug']:
             for img in args['<image>']:
-                results.append(par(img))
+                if os.isfile(img):
+                    results.append(par(img))
+                else:
+                    log.error('{} is not a file'.format(img))
         else:
             threads = np.min([int(args['--threads']), cpu_count()])
             pool = Pool(processes=threads, maxtasksperchild=50)
@@ -282,9 +289,10 @@ def main(args):
     mean = df.mean(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
     std = df.std(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
 
+    embed()
     # we need a big data set for averaging, so only stars with > 10 data points are allowed
     df.reset_index(inplace=True)
-    #df = df.groupby('HIP').filter(lambda x : len(x.index) > 10)
+    df = df.groupby('HIP').filter(lambda x : len(x.index) > 10)
 
 
     #####################################################
