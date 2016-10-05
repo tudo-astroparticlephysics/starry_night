@@ -131,15 +131,13 @@ def main(args):
                     configList.pop(-1)
     # also check if config file was path to a config file somewhere else
     if conf_succ == 0 and os.path.isfile(args['-c']):
-        configList.append(configparser.RawConfigParser())
-        conf_succ += len(config.read(pkg_resources.resource_filename(
-            'starry_night', 'data/{}_cam.config'.format(args['-c']))
-        ))
         log.debug('Parsing config file: {}'.format(args['-c']))
+        configList.append(configparser.RawConfigParser())
+        conf_succ += len(configList[-1].read(args['-c']))
 
     if conf_succ == 0:
         configList.clear()
-        log.error('Unable to parse config file. Does the file exist?')
+        log.error('Unable to parse any config file. Does the file exist?')
         sys.exit(1)
     del conf_succ
 
@@ -205,8 +203,9 @@ def main(args):
                 time.sleep(30)
                 continue
                 
-            skycam.process_image(img, data, configList, args)
+            results.append(skycam.process_image(img, data, configList, args))
             if not args['--daemon']:
+                log.info('Do not download any more images because option --daemon is not set')
                 break
 
     else:
