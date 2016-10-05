@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, VARCHAR, DateTime, Float, ForeignKey, create_engine, MetaData
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
 import logging
 from IPython import embed
@@ -45,7 +45,7 @@ def writeSQL(config, data):
     log.debug('Create SQL engine')
     engine = create_engine(config['SQL']['connection'])
     sMaker = sessionmaker(bind=engine)
-    session = sMaker()
+    session = scoped_session(sMaker)
     
     session.add(SqlEntry(
                     timestamp=data['timestamp'],
@@ -85,3 +85,4 @@ def writeSQL(config, data):
         log.error(e)
         log.error('You might need to hand np.float64.item() to SQL writer because this will return pythons native float object')
         sys.exit(1)
+    session.close()
