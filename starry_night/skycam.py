@@ -812,23 +812,30 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             if hdulist[0].header['BITPIX'] == 16:
                 # 16bit data in fits files is signed
                 img += 2**16 /2 - 1
-            try:
-                if config['properties']['timeKey']:
-                    time = datetime.strptime(
-                        hdulist[0].header[config['properties']['timeKey']],
-                        config['properties']['timeformat'],
-                        )
-                else:
-                    time = datetime.strptime(
-                        filename,
-                        config['properties']['timeformat'],
-                        )
-            except KeyError:
+            if config['properties']['timeKey']:
+                # there is a mixture of timekeys in my set of fits files so I need a generic solution
+                '''
                 time = datetime.strptime(
-                    hdulist[0].header['UTCNOW'],
-                    '%Y-%m-%d %H:%M:%S',
+                    hdulist[0].header[config['properties']['timeKey']],
+                    config['properties']['timeformat'],
                     )
-
+                '''
+                time=None
+                for t in [['UTC', '%Y/%m/%d %H:%M:%S'] , ['TIMEUTC', '%Y-%m-%d %H:%M:%S']]:
+                    try:
+                        time = datetime.strptime(
+                            hdulist[0].header[t[0]],
+                            t[1],
+                            )
+                    except KeyError:
+                        pass
+                if time == None:
+                    raise KeyError('Timestamp not found in file {}'.format(filepath))
+            else:
+                time = datetime.strptime(
+                    filename,
+                    config['properties']['timeformat'],
+                    )
         except (ValueError, KeyError,OSError,FileNotFoundError) as e:
             log.error('Error parsing timestamp of {}: {}'.format(filepath, e))
             return
