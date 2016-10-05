@@ -40,7 +40,6 @@ from __future__ import print_function
 from docopt import docopt
 import pkg_resources
 import logging
-import os
 import sys
 import time
 import numpy as np
@@ -56,6 +55,7 @@ from scipy.optimize import curve_fit
 from re import split
 from getpass import getpass
 from sqlalchemy import create_engine
+import os
 
 from sqlalchemy.exc import OperationalError
 import requests.exceptions as rex
@@ -66,14 +66,9 @@ from starry_night import skycam, cloud_tracker
 from IPython import embed
 
 #######################################################
-set_start_method('forkserver')
 
 def wrapper(const_celestialObjects, configList, args, img):
-    ret = skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
-    if not ret:
-        return -1
-    else:
-        return ret
+    return skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
 
 
 
@@ -87,7 +82,7 @@ logfile_path = os.path.join(
     directory, 'starry_night-{}.log'.format(datetime.utcnow().isoformat())
     )
 logfile_handler = logging.FileHandler(filename=logfile_path, mode='w')
-logfile_handler.setLevel(logging.INFO)
+logfile_handler.setLevel(logging.ERROR)
 logstream_handler = logging.StreamHandler()
 formatter = logging.Formatter(
     fmt='%(asctime)s - %(levelname)s - %(name)s | %(message)s',

@@ -19,7 +19,6 @@ from scipy.optimize import curve_fit
 from io import BytesIO
 from skimage.io import imread
 from skimage.color import rgb2gray
-import os
 from os import stat
 import skimage.filters
 import warnings
@@ -36,42 +35,9 @@ from hashlib import sha1
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError, InternalError
 import requests.exceptions as rex
-from functools import wraps
-import signal
-import errno
 
 from IPython import embed
 
-
-class TimeoutError(Exception):
-    pass
-
-def timeout(seconds=10, error_message=os.strerror(errno.ETIME)):
-    def decorator(func):
-        def _handle_timeout(signum, frame):
-            raise TimeoutError(error_message)
-
-        def wrapper(*args, **kwargs):
-            signal.signal(signal.SIGALRM, _handle_timeout)
-            signal.alarm(seconds)
-            try:
-                result = func(*args, **kwargs)
-            finally:
-                signal.alarm(0)
-            return result
-
-        return wraps(func)(wrapper)
-
-    return decorator
-
-
-@timeout(5)
-def imread_timeout(filepath, mode, as_grey):
-    # sometimes imread freezes, so we need this to resume
-    try:
-        return imread(filepath, mode=mode, as_grey=as_grey)
-    except TimeoutError:
-        return
 
 
 def degDist(ra1, ra2, dec1, dec2):
@@ -843,6 +809,9 @@ def getImageDict(filepath, config, crop=None, fmt=None):
         try:
             hdulist = fits.open(filepath, ignore_missing_end=True)
             img = hdulist[0].data
+            if hdulist[0].header['BITPIX'] == 16:
+                # 16bit data in fits files is signed
+                img += 2**16 /2 - 1
             if config['properties']['timeKey']:
                 time = datetime.strptime(
                     hdulist[0].header[config['properties']['timeKey']],
@@ -860,7 +829,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     else:
         # read normal image file
         try:
-            img = imread_timeout(filepath, mode='L', as_grey=True)
+            img = imread(filepath, mode='L', as_grey=True)
         except (FileNotFoundError, OSError, ValueError) as e:
             log.error('Error reading file \'{}\': {}'.format(filename+'.'+filetype, e))
             return
@@ -1561,8 +1530,8 @@ def process_image(images, data, configList, args):
     if args['--sql']:
         try:
             sql.writeSQL(config, output)
-        except (OperationalError):
-            log.error('Writing to SQL server failed. Server up? Password correct?')
+        except (OperationalError) as e:
+            log.error('Writing to SQL server failed. Server up? Password correct? {}'.format(e))
         except InternalError as e:
             log.error('Error while writing to SQL server: {}'.format(e))
 
