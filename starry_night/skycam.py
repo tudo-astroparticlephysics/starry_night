@@ -812,16 +812,23 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             if hdulist[0].header['BITPIX'] == 16:
                 # 16bit data in fits files is signed
                 img += 2**16 /2 - 1
-            if config['properties']['timeKey']:
+            try:
+                if config['properties']['timeKey']:
+                    time = datetime.strptime(
+                        hdulist[0].header[config['properties']['timeKey']],
+                        config['properties']['timeformat'],
+                        )
+                else:
+                    time = datetime.strptime(
+                        filename,
+                        config['properties']['timeformat'],
+                        )
+            except KeyError:
                 time = datetime.strptime(
-                    hdulist[0].header[config['properties']['timeKey']],
-                    config['properties']['timeformat'],
+                    hdulist[0].header['UTCNOW'],
+                    '%Y-%m-%d %H:%M:%S',
                     )
-            else:
-                time = datetime.strptime(
-                    filename,
-                    config['properties']['timeformat'],
-                    )
+
         except (ValueError, KeyError,OSError,FileNotFoundError) as e:
             log.error('Error parsing timestamp of {}: {}'.format(filepath, e))
             return
