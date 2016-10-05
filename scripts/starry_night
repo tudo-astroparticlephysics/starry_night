@@ -237,10 +237,7 @@ def main(args):
         # process all images and store results
         if args['--debug']:
             for img in args['<image>']:
-                if os.isfile(img):
-                    results.append(par(img))
-                else:
-                    log.error('{} is not a file'.format(img))
+                results.append(par(img))
         else:
             threads = np.min([int(args['--threads']), cpu_count()])
             pool = Pool(processes=threads, maxtasksperchild=50)
