@@ -1166,8 +1166,10 @@ def process_image(images, data, configList, args):
         # result will be stored as 'resp'
         if args['--function'] == 'All' or args['--ratescan']:
             grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
-            sobel = convolve(img, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(img, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
-            log = convolve_fft(img, LoG_kernel)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                sobel = convolve(img, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(img, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
+                log = convolve_fft(img, LoG_kernel)
 
             grad[crop_mask] = np.NaN
             sobel[crop_mask] = np.NaN
@@ -1180,11 +1182,15 @@ def process_image(images, data, configList, args):
         elif args['--function'] == 'DoG':
             resp = skimage.filters.gaussian(img, sigma=k) - skimage.filters.gaussian(img, sigma=1.6*k)
         elif args['--function'] == 'LoG':
-            resp = convolve_fft(img, LoG_kernel)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                resp = convolve_fft(img, LoG_kernel)
         elif args['--function'] == 'Grad':
             resp = ((img - np.roll(img, 1, axis=0)).clip(min=0))**2 + ((img - np.roll(img, 1, axis=1)).clip(min=0))**2
         elif args['--function'] == 'Sobel':
-            resp = convolve(img, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(img, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                resp = convolve(img, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(img, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
         else:
             log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
             sys.exit(1)
@@ -1201,16 +1207,20 @@ def process_image(images, data, configList, args):
         log.debug('Calculate Filter response')
         
         # calculate x and y position where response has its max value (search within 'tolerance' range)
-        stars = pd.concat([stars.drop(['maxX','maxY'], errors='ignore', axis=1), stars.apply(
-                lambda s : findLocalMaxPos(resp, s.x, s.y, tolerance),
-                axis=1)], axis=1
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            stars = pd.concat([stars.drop(['maxX','maxY'], errors='ignore', axis=1), stars.apply(
+                    lambda s : findLocalMaxPos(resp, s.x, s.y, tolerance),
+                    axis=1)], axis=1
+            )
 
         # drop stars that got mistaken for a brighter neighboor
         stars = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
 
         # calculate response and drop stars that were not found at all, because response=0 interferes with log-plot
-        stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
         #stars['response_mean'] = stars.apply(lambda s : findLocalMean(img, s.x, s.y, 50), axis=1)
         #stars['response_std'] = stars.apply(lambda s : findLocalStd(img, s.x, s.y, 50), axis=1)
         stars.query('response > 1e-100', inplace=True)
