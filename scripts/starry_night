@@ -181,6 +181,7 @@ def main(args):
             data['positioning_file'] = pd.read_hdf(args['-p'], key='table')[['MJD','ra','dec']]
         except (IOError, HDF5ExtError) as e:
             log.error(e.args[0])
+            sys.exit(1)
 
     log.debug('Aquire Image(s)')
     results = list()
@@ -286,7 +287,6 @@ def main(args):
     mean = df.mean(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
     std = df.std(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
 
-    embed()
     # we need a big data set for averaging, so only stars with > 10 data points are allowed
     df.reset_index(inplace=True)
     df = df.groupby('HIP').filter(lambda x : len(x.index) > 10)
@@ -319,6 +319,9 @@ def main(args):
         grouped = df.groupby('HIP')
         # fit transmission for each star
         for group in grouped:
+            # dont use stars for fit that do not span a wide distance 
+            if group[1].altitude.max() - group[1].altitude.min() < np.deg2rad(float(config['image']['openingangle']))/2:
+                continue
             x = group[1].sort_values('altitude').altitude.values
             y = group[1].sort_values('altitude').response_orig.values
             try:
@@ -327,29 +330,32 @@ def main(args):
                 # skip group if fit does not converge
                 # this might happen in a few cases where we have a small amount of data points with dark stars that fluctuate very much
                 continue
-            r.append((group[1].altitude.values.max(), popt[0], np.sqrt(pcov[0,0]), popt[1], np.sqrt(pcov[1,1]) ))
-
+            r.append((group[1].vmag.max(), popt[0], np.sqrt(pcov[0,0]), popt[1], np.sqrt(pcov[1,1]), group[1]['B-V'].max(), group[1]['BTmag'].max(), group[1]['VTmag'].max() ))
 
         # do a fit of all transmissions
         r = np.array(r)
         coefficient = np.average(r[:,3], weights=1/r[:,4])
         print(coefficient)
         popt, pcov = curve_fit(skycam.lin, r[:,0], r[:,3], sigma=r[:,4], p0=[0,0])
-        x = np.linspace(0,np.pi/2,5)
+        x = np.linspace(-1,7,5)
         y = skycam.lin(x, popt[0], popt[1])
 
         fig = plt.figure(figsize=(16,9))
         ax = fig.add_subplot(111)
-        plt.errorbar(r[:,0]*180/np.pi, r[:,3], yerr=r[:,4], linestyle='', color='blue', marker='o', ms=2)
-        plt.plot(x*180/np.pi,y, color='red', label='linear regression')
+        plt.errorbar(r[:,0], r[:,3], yerr=r[:,4], linestyle='', color='blue', marker='o', ms=2)
+        plt.plot(x, y, color='red', label='linear regression')
+        plt.xlim((-0.5,6.5))
+        plt.ylim((-1,2))
         plt.xlabel('Max observed star altitude')
-        plt.ylabel('Airmass coefficient')
+        plt.ylabel('Air mass coefficient')
+        '''
         plt.gca().text(0.98, 0.02, 'Weighted average: {}'.format(round(coefficient,4)),
             verticalalignment='bottom', horizontalalignment='right',
             transform=plt.gca().transAxes,
             backgroundcolor='white',
             color='black', fontsize=25,
         )
+        '''
         plt.grid()
         plt.legend()
         if args['-v']:
@@ -359,7 +365,8 @@ def main(args):
 
         plt.figure(figsize=(16,9))
         plt.hist(r[:,3], bins=100, range=(-1,2))
-        plt.xlabel('Airmass coefficient')
+        plt.xlabel('Air mass coefficient')
+        plt.xlim((-0.5,1))
         print(popt, pcov)
         if args['-s']:
             plt.savefig('airmass_fit_{}'.format(config['properties']['name']), dpi=200)
@@ -377,17 +384,17 @@ def main(args):
         #remove stars that do not have a wide enough span of their altitude for plotting
         plot_df = grouped.filter(lambda x, df=df: x.altitude.max() > np.percentile(df.altitude, 95) and x.altitude.min() < np.percentile(df.altitude, 5))
 
+
         for i, vmag in enumerate(vmag_to_plot):
             c = color[i]
             # get star with magnitude closest to 'vmag'
-            # ignore 2 stars with HIP because they are not good examples for the plot
             to_plot = plot_df.query(
                     'HIP == {}'.format(
-                    plot_df.ix[(plot_df.query('HIP != 75312 and HIP != 52686').vmag-vmag).abs().sort(inplace=False).index[0]].HIP
+                    plot_df.ix[(plot_df.vmag-vmag).abs().sort(inplace=False).index[0]].HIP
                 )
             ).sort_values('altitude')
 
-            if abs(to_plot.vmag.max() - vmag)>=0.5:
+            if abs(to_plot.vmag.max() - vmag) >= 0.25:
                 # dont plot, if magnitude differs too much
                 continue
            
@@ -395,21 +402,26 @@ def main(args):
             #popt, pcov = curve_fit(skycam.transmission2, to_plot.altitude.values, to_plot.response_orig.values, p0=[0,0.57])
             popt, pcov = curve_fit(skycam.transmission3, to_plot.altitude.values, to_plot.response_orig.values, p0=[0,0.57])
 
-            ax.scatter(x=to_plot['altitude']/np.pi*180, y=to_plot['response_orig'], c=c, label='vmag = {}'.format(to_plot.vmag.max()))
-            ax.plot(to_plot.altitude/np.pi*180, skycam.transmission3(to_plot.altitude.values, popt[0], coefficient), c=c)
+            ax.scatter(x=90-np.rad2deg(to_plot['altitude']), y=to_plot['response_orig'], c=c, label='mag = {}'.format(to_plot.vmag.max()))
+            ax.plot(90-np.rad2deg(to_plot.altitude), skycam.transmission3(to_plot.altitude.values, popt[0], coefficient), c=c)
             print(vmag, to_plot.HIP.max(), popt)
 
         ax.semilogy()
-        ax.set_xlabel('Altitude')
+        ax.set_xlabel('Zenith angle')
         ax.set_ylabel('Response')
+        ax.set_xlim((0,95))
+        ax.set_ylim((47,42000))
         ax.grid()
         ax.legend(loc='upper right')
+        plt.show()
+        '''
         plt.gca().text(0.98, 0.02, 'Fit result: $T(X)=e^{{-{}\cdot X}}$'.format(round(coefficient,4)),
             verticalalignment='bottom', horizontalalignment='right',
             transform=plt.gca().transAxes,
             backgroundcolor='white',
             color='black', fontsize=25,
         )
+        '''
         if args['-s']:
             plt.savefig('airmass_absorbtion_{}'.format(config['properties']['name']), dpi=200)
         if args['-v']:
@@ -419,28 +431,57 @@ def main(args):
 
 
         fig = plt.figure(figsize=(16,9))
-        x = np.linspace(5/180*np.pi, np.pi/2, 200)
+        x = np.linspace(0.1, 90.0, 500)
 
-        y1 = skycam.transmission(x,1, coefficient)
-        y2 = skycam.transmission2(x,1, coefficient)
-        y3 = skycam.transmission3(x,1, coefficient)
+        # calculate absolut airmass for all 3 formulas
+        y1 = np.log(skycam.transmission((90-x)/180*np.pi,1, coefficient))/-coefficient+1
+        y2 = np.log(skycam.transmission2((90-x)/180*np.pi,1, coefficient))/-coefficient+1
+        y3 = np.log(skycam.transmission3((90-x)/180*np.pi,1, coefficient))/-coefficient+0.7684
 
         ax = fig.add_subplot(111)
-        ax.plot(x*180/np.pi,y1, label='Planar')
-        ax.plot(x*180/np.pi,y2, label='Planar Corrected')
-        ax.plot(x*180/np.pi,y3, label='Spherical elevated observer')
+        ax.plot(x, y1, label='Planar')
+        ax.plot(x, y2, label='Planar Corrected (Young 1967)')
+        ax.plot(x, y3, label='Spherical elevated observer')
         ax.grid()
-        ax.set_xlabel('Altitude')
-        ax.set_ylabel('Transmission')
+        ax.set_xlim((75,90))
+        ax.set_ylim((-15,50))
+        ax.set_xlabel('Zenith angle $[^\circ]$')
+        ax.set_ylabel('Air mass')
         ax.legend(loc='best')
-        ax.text(0.95, 0.01, 'Transmission coefficient = {}'.format(round(coefficient,4)),
-            verticalalignment='bottom', horizontalalignment='right',
+        if args['-s']:
+            plt.savefig('airmass_curve', dpi=200)
+        if args['-v']:
+            plt.show()
+        plt.close('all')
+
+
+
+        fig = plt.figure(figsize=(16,9))
+        x = np.linspace(0.1, 90.0, 200)
+
+        y1 = skycam.transmission((90-x)/180*np.pi,1, coefficient)
+        y2 = skycam.transmission2((90-x)/180*np.pi,1, coefficient)
+        y3 = skycam.transmission3((90-x)/180*np.pi,1, coefficient)
+
+        ax = fig.add_subplot(111)
+        ax.plot(x, y1, label='Planar')
+        ax.plot(x, y2, label='Planar Corrected')
+        ax.plot(x, y3, label='Spherical elevated observer')
+        ax.scatter(x=90-np.rad2deg(good_fit['altitude']), y=good_fit['response_orig']/good_fit.query('altitude > 1.3')['response_orig'].mean(), c='red', label='mag = {}'.format(good_fit.vmag.max()))
+        ax.grid()
+        ax.set_xlim((0,90))
+        ax.set_ylim((-0.05,1.1))
+        ax.set_xlabel('Zenith angle $[^\circ]$')
+        ax.set_ylabel('Transmission')
+        ax.legend(loc='upper right')
+        ax.text(0.05, 0.01, 'Transmission coefficient = {}'.format(round(coefficient,4)),
+            verticalalignment='bottom', horizontalalignment='left',
             transform=ax.transAxes,
             backgroundcolor='white',
             color='black', fontsize=15
         )
         if args['-s']:
-            plt.savefig('transmission_curve_{}'.format(config['properties']['name']), dpi=200)
+            plt.savefig('transmission_curve', dpi=200)
         if args['-v']:
             plt.show()
         plt.close('all')

@@ -13,14 +13,16 @@ from time import sleep
 from astropy.io import fits
 from astropy.time import Time
 from astropy.convolution import convolve, convolve_fft
+from astropy import units as u
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from scipy.io import matlab
 from scipy.ndimage.measurements import label
 from scipy.optimize import curve_fit
 from io import BytesIO
 from skimage.io import imread
 from skimage.color import rgb2gray
-from os import stat
 import skimage.filters
+from os import stat
 import warnings
 
 from datetime import datetime, timedelta
@@ -42,8 +44,8 @@ from IPython import embed
 
 def degDist(ra1, ra2, dec1, dec2):
     '''
-    Haversine formula.
     Returns great circle distance between two points on a sphere in degree.
+    Using haversine formula.
 
     Input: ra and dec in rad
     Output: Angle in degree
@@ -62,6 +64,7 @@ def LoG(x,y,sigma):
     return kernel * sigma**2
 
 def lin(x,m,b):
+    'Just a linear function'
     return m*x+b
 
 def expo(x,m,b):
@@ -245,46 +248,6 @@ def getBlobsize(img, thresh, limit=0):
     return count
     
 
-def run():
-    log = logging.getLogger(__name__)
-    wait = 120  #wait 120 seconds between downloads
-    old_date = datetime(2000, 1, 1)
-    while True:
-        # allsky images are only taken during night time
-        if True: #datetime.utcnow().hour > 17 or datetime.utcnow().hour < 9:
-            log.info('Downloading image')
-            try:
-                date = get_last_modified(url, timeout=5)
-            except (KeyboardInterrupt, SystemExit):
-                exit(0)
-            except Exception as e:
-                log.error(
-                    'Fetching Last-Modified failed with error:\n\t{}'.format(e)
-                )
-                sleep(10)
-                continue
-
-            if date > old_date:
-                log.info('Found new file, downloading')
-                try:
-                    log.debug('debug test')
-                    old_date = date
-                    #downloading an image may take some time. So try next download right after the first one
-                    continue 
-                except (KeyboardInterrupt, SystemExit):
-                    exit(0)
-                except Exception as e:
-                    log.error('Download failed with error: \n\t{}'.format(e))
-                    sleep(10)
-                    continue
-            else:
-                log.info('No new image found')
-        else:
-                log.info('Daytime - no download')
-
-        sleep(wait)
-
-
 def theta2r(theta, radius, how='lin'):
     '''
     convert angle to the optical axis into pixel distance to the camera
@@ -359,9 +322,9 @@ def find_matching_pos(img_timestamp, time_pos_list):
     we need to find out where the lidar was looking at that point in time when we took the image
     '''
     # select measurements that were taken not more than 1 min after the image and not earlyer than 10min before the image
-    subset = time_pos_list.query('1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(img_timestamp)).sort_values('MJD')
+    subset = time_pos_list.query('-1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(img_timestamp)).sort_values('MJD')
     closest = subset[subset.MJD==subset.MJD.min()]
-    return closest[['ra','dec']]
+    return closest
 
 
 def obs_setup(properties):
@@ -373,6 +336,15 @@ def obs_setup(properties):
     obs.epoch = ephem.J2000
     return obs
 
+def eq2ho(ra, dec, prop, time):
+    loc = EarthLocation.from_geodetic(lat=float(prop['latitude'])*u.deg, lon=float(prop['longitude'])*u.deg, height=float(prop['elevation'])*u.m)
+    c = SkyCoord(ra=ra*u.radian, dec=dec*u.radian, frame='icrs', location=loc, obstime=time).transform_to('altaz').altaz
+    return c.az.rad, c.alt.rad
+
+def ho2eq(az, alt, prop, time):
+    loc = EarthLocation.from_geodetic(lat=float(prop['latitude'])*u.deg, lon=float(prop['longitude'])*u.deg, height=float(prop['elevation'])*u.m)
+    c = SkyCoord(az=az*u.radian, alt=alt*u.radian, location=loc, frame='altaz', obstime=time).transform_to('icrs')
+    return c.ra.rad, c.dec.rad
 
 def equatorial2horizontal(ra, dec, observer):
     '''
@@ -579,13 +551,13 @@ def update_star_position(data, observer, conf, crop, args):
     # remove objects that are not within the limits
     stars = data['stars'].copy()
     points_of_interest = data['points_of_interest'].copy()
+
     if args['-p']:
-        lidar_old = find_matching_pos(Time(data['timestamp']).mjd, data['positioning_file'])/180*np.pi
+        lidar_old = find_matching_pos(Time(data['timestamp']).mjd, data['positioning_file'])
         lidar_old['name'] = 'Lidar'
         lidar_old['ID'] = -2
         lidar_old['radius'] = float(conf['analysis']['poi_radius'])
         points_of_interest = points_of_interest.append(lidar_old, ignore_index=True)
-
 
     stars['azimuth'], stars['altitude'] = equatorial2horizontal(
         stars.ra, stars.dec, observer,
@@ -1090,9 +1062,6 @@ def process_image(images, data, configList, args):
     if config == None:
         log.error('No config file with valid start date < {}'.format(images['timestamp']))
         return
-    # choose config file:
-    #for c in configList:
-    #    if c['properties']['useConfAfter']
 
     log.info('Processing image taken at: {}'.format(images['timestamp']))
     observer = obs_setup(config['properties'])
