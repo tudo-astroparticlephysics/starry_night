@@ -157,6 +157,8 @@ def main(args):
     if args['--sql']:
         log.info('Storing results in SQL Database.\nConnection: {}\nPlease enter password'.format(config['SQL']['connection']))
         config['SQL']['connection'] = config['SQL']['connection'].format(getpass())
+        for c in configList:
+            c['SQL']['connection'] = config['SQL']['connection']
         try:
             engine = create_engine(config['SQL']['connection'])
             if not engine.execute('SELECT VERSION();'):
@@ -166,6 +168,7 @@ def main(args):
         except (OperationalError,InternalError) as e:
             log.error(e)
             sys.exit(1)
+    embed()
     if not args['<image>']:
         log.info('Please enter password to get acces to Magic lidar. Leave blank to skip.')
         data['lidarpwd'] = getpass()
