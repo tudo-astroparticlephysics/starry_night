@@ -103,7 +103,6 @@ class CloudTracker:
         shifted_map[mask] = np.NaN
         return shifted_map
 
-
     def __calculate_movement(self, map1, map2):
         '''
         return x and y shift of clouds and min difference between images
@@ -124,7 +123,6 @@ class CloudTracker:
                 if temp <= 0:
                     break
         return rotation[::-1], minVal
-
 
     def print_clouds(self):
         print('Currently {} images loaded'.format(len(self.maps)))

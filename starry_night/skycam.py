@@ -762,16 +762,11 @@ def getImageDict(filepath, config, crop=None, fmt=None):
         try:
             data = matlab.loadmat(filepath)
             img = data['pic1']
-            if config['properties']['timeKey']:
-                time = datetime.strptime(
-                    data[config['properties']['timeKey']][0],
-                    config['properties']['timeformat']
-                )
-            else:
-                time = datetime.strptime(
-                    filename,
-                    config['properties']['timeformat'],
-                    )
+            time = datetime.strptime(
+                data['UTC1'],
+                '%Y/%m/%d %H:%M:%S'
+                #config['properties']['timeformat']
+            )
         except (KeyError,ValueError,OSError, FileNotFoundError) as e:
             log.error('Failed to open image {}: {}'.format(filepath, e))
             return
@@ -834,6 +829,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     img = img.astype('float32') #needs to be float because we want to set some values NaN while cropping
     return dict({'img': img, 'timestamp': time})
 
+
 def update_crop_moon(crop_mask, moon, conf):
     '''
     Add crop area for the moon to existing crop mask
@@ -847,7 +843,6 @@ def update_crop_moon(crop_mask, moon, conf):
     return crop_mask
 
 
-    
 def get_crop_mask(img, crop):
     '''
     Return crop mask specified in 'crop'
@@ -1525,6 +1520,7 @@ def process_image(images, data, configList, args):
             sql.writeSQL(config, output)
         except (OperationalError) as e:
             log.error('Writing to SQL server failed. Server up? Password correct? {}'.format(e))
+            sys.exit(1)
         except InternalError as e:
             log.error('Error while writing to SQL server: {}'.format(e))
 

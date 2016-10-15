@@ -168,7 +168,6 @@ def main(args):
         except (OperationalError,InternalError) as e:
             log.error(e)
             sys.exit(1)
-    embed()
     if not args['<image>']:
         log.info('Please enter password to get acces to Magic lidar. Leave blank to skip.')
         data['lidarpwd'] = getpass()
@@ -217,13 +216,18 @@ def main(args):
         # remove entries that are no valid files
         i = 0
         while len(args['<image>']) > i:
+            # expand content of directories
             if os.path.isdir(args['<image>'][i]):
                 _dir = args['<image>'].pop(i)
                 for root, dirs, files in os.walk(_dir):
                     for f in files:
                         args['<image>'].append(os.path.join(root,f))
             else:
+                # remove invalid files
                 if os.path.isfile(args['<image>'][i]):
+                    # remove files with wrong filter (this is a temporary code snippet, remove later!!!)
+                    if bool(re.search('mat_[234]', args['<image>'][i])):
+                        args['<image>'].pop(i)
                     i += 1
                 else:
                     args['<image>'].pop(i)
