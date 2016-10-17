@@ -763,7 +763,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             data = matlab.loadmat(filepath)
             img = data['pic1']
             time = datetime.strptime(
-                data['UTC1'],
+                data['UTC1'][0],
                 '%Y/%m/%d %H:%M:%S'
                 #config['properties']['timeformat']
             )

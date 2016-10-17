@@ -52,7 +52,7 @@ from datetime import datetime, timedelta
 from multiprocessing import Pool, cpu_count, set_start_method
 from functools import partial
 from scipy.optimize import curve_fit
-from re import split
+from re import split, search
 from getpass import getpass
 from sqlalchemy import create_engine
 import os
@@ -226,7 +226,7 @@ def main(args):
                 # remove invalid files
                 if os.path.isfile(args['<image>'][i]):
                     # remove files with wrong filter (this is a temporary code snippet, remove later!!!)
-                    if bool(re.search('mat_[234]', args['<image>'][i])):
+                    if bool(search('mat_[234]', args['<image>'][i])):
                         args['<image>'].pop(i)
                     i += 1
                 else:
