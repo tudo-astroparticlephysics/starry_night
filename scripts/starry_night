@@ -226,7 +226,7 @@ def main(args):
                 # remove invalid files
                 if os.path.isfile(args['<image>'][i]):
                     # remove files with wrong filter (this is a temporary code snippet, remove later!!!)
-                    if bool(search('mat_[234]', args['<image>'][i])):
+                    if bool(search('_[234]\.', args['<image>'][i])):
                         args['<image>'].pop(i)
                     i += 1
                 else:
