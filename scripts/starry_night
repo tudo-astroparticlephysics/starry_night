@@ -264,6 +264,7 @@ def main(args):
     
     imgCount = len(results)
     log.info('{} images were processed successfully.'.format(imgCount))
+    embed()
 
 
     #####################################################
