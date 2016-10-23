@@ -1198,8 +1198,21 @@ def process_image(images, data, configList, args):
             stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
         ulim, llim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), 
                 list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
+
         # offset of upper limit can be reduced if moonlight reduces exposure time
-        ulim[1]=ulim[1] - np.log10(float(config['analysis']['moonExposureFactor']))
+        if np.rad2deg(moon.alt) > 10.0:
+            ulim[1]=ulim[1] - np.log10(float(config['analysis']['moonExposureFactor']))
+
+        # remove stars for all magnitudes where upperLimit < lowerLimit
+        if ulim[0] != llim[0]:
+            intersection = (llim[1] - ulim[1]) / (ulim[0] - llim[0])
+            if ulim[0] < llim[0]:
+                data['vmaglimit'] = max(intersection, data['vmaglimit'])
+                #stars.loc[stars.vmag.values > intersection, 'visible'] = 0
+                stars.query('vmag < {}'.format(intersection), inplace=True)
+            else:
+                #stars.loc[stars.vmag.values < intersection, 'visible'] = 0
+                stars.query('vmag > {}'.format(intersection), inplace=True)
 
         # calculate visibility percentage
         # if response > visibleUpperLimit -> visible=1
@@ -1213,18 +1226,6 @@ def process_image(images, data, configList, args):
                     ((stars['vmag']*ulim[0] + ulim[1]) - (stars['vmag']*float(llim[0]) + llim[1]))
                     )
                 )
-        # remove stars for all magnitudes where upperLimit < lowerLimit
-        if ulim[0] != llim[0]:
-            intersection = (llim[1] - ulim[1]) / (ulim[0] - llim[0])
-            if ulim[0] < llim[0]:
-                data['vmaglimit'] = max(intersection, data['vmaglimit'])
-                #stars.loc[stars.vmag.values > intersection, 'visible'] = 0
-                stars.query('vmag < {}'.format(intersection), inplace=True)
-            else:
-                #stars.loc[stars.vmag.values < intersection, 'visible'] = 0
-                stars.query('vmag > {}'.format(intersection), inplace=True)
-
-        #stars['blobSize'] = stars.apply(lambda s : getBlobsize(resp[s.maxY-25:s.maxY+26, s.maxX-25:s.maxX+26], s.response*0.1), axis=1)
 
         # append results
         kernelResults.append(stars)
@@ -1386,7 +1387,9 @@ def process_image(images, data, configList, args):
             ax_in.get_xaxis().set_visible(False)
             ax_in.get_yaxis().set_visible(False)
             
-            ax.legend(loc='best')
+            leg = ax.legend(loc='best')
+            leg.legendHandles[2].set_color('yellow')
+            plt.tight_layout()
             if args['-s']:
                 plt.savefig('response_{}_{}.png'.format(args['--function'], images['timestamp'].isoformat()))
             if args['--daemon']:
