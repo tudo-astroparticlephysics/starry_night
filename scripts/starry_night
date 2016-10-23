@@ -14,7 +14,7 @@ Options:
     -v              Visual output
     -s              Save output to files
     --kernel=<k>    Try different kernel sizes from 1 to <k> in steps of 5
-    --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG', 'All')
+    --function=<f>  Function used for calculation of response ('Grad','Sobel','LoG','All')
                     Using option '--ratescan' implies 'LoG'. [default: LoG]
     --vmag=<v>      Set custom magnitude limit.
     --threads=<t>   Set number of threads for multiprocessing. Can not spawn more threads than cores. [Default: 4]
@@ -66,6 +66,10 @@ from starry_night import skycam, cloud_tracker
 from IPython import embed
 
 #######################################################
+
+font = {'size'   : 22}
+rc('font', **font)
+
 
 def wrapper(const_celestialObjects, configList, args, img):
     return skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
@@ -226,8 +230,9 @@ def main(args):
                 # remove invalid files
                 if os.path.isfile(args['<image>'][i]):
                     # remove files with wrong filter (this is a temporary code snippet, remove later!!!)
-                    if bool(search('_[234]\.', args['<image>'][i])):
-                        args['<image>'].pop(i)
+                    #if bool(search('_[234]\.', args['<image>'][i])):
+                        #args['<image>'].pop(i)
+                        #continue
                     i += 1
                 else:
                     args['<image>'].pop(i)
@@ -253,7 +258,7 @@ def main(args):
             pool.close()
             pool.join()
 
-    # drop all empty dics (image processing was aborted because of high sun)
+    # drop all empty dictionaries (image processing was aborted because of high sun)
     # and merge the remaining files
     i=0
     while i<len(results):
@@ -264,12 +269,11 @@ def main(args):
     
     imgCount = len(results)
     log.info('{} images were processed successfully.'.format(imgCount))
-    embed()
 
 
     #####################################################
 
-    # no more processing if no images were processed successfully
+    # no more processing if only a few images were processed successfully
     if len(results) <= 5:
         log.info('Stop because only {} image(s) were processed. And we don\'t have enough data for further steps.'.format(len(results)))
         sys.exit(0)
@@ -277,6 +281,7 @@ def main(args):
     if args['--low-memory']:
         log.info('Option \'low-memory\' was activated. No data for further processing')
         sys.exit(0)
+
     star_list = list(map(lambda x: x['stars'], results))
     timestamp_list = list(map(lambda x: x['timestamp'], results))
     if args['--cloudtrack']:

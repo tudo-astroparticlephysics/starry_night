@@ -777,8 +777,8 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             hdulist = fits.open(filepath, ignore_missing_end=True)
             img = hdulist[0].data
             if hdulist[0].header['BITPIX'] == 16:
-                # 16bit data in fits files is signed
-                img += 2**16 /2 - 1
+                # convert 16bit data from signed to unsigned
+                img += 2**15
             if config['properties']['timeKey']:
                 # there is a mixture of timekeys in my set of fits files so I need a generic solution
                 '''
@@ -1198,6 +1198,8 @@ def process_image(images, data, configList, args):
             stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
         ulim, llim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), 
                 list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
+        # offset of upper limit can be reduced if moonlight reduces exposure time
+        ulim[1]=ulim[1] - np.log10(float(config['analysis']['moonExposureFactor']))
 
         # calculate visibility percentage
         # if response > visibleUpperLimit -> visible=1
@@ -1211,12 +1213,16 @@ def process_image(images, data, configList, args):
                     ((stars['vmag']*ulim[0] + ulim[1]) - (stars['vmag']*float(llim[0]) + llim[1]))
                     )
                 )
-        #stars.loc[stars.response_std/stars.response_mean > 1.5, 'visible'] = 0
-        # set visible = 0 for all magnitudes where upperLimit < lowerLimit
-        if ulim[0] < llim[0]:
-            stars.loc[stars.vmag.values > (llim[1] - ulim[1]) / (ulim[0] - llim[0]), 'visible'] = 0
-        elif ulim[0] > llim[0]:
-            stars.loc[stars.vmag.values < (llim[1] - ulim[1]) / (ulim[0] - llim[0]), 'visible'] = 0
+        # remove stars for all magnitudes where upperLimit < lowerLimit
+        if ulim[0] != llim[0]:
+            intersection = (llim[1] - ulim[1]) / (ulim[0] - llim[0])
+            if ulim[0] < llim[0]:
+                data['vmaglimit'] = max(intersection, data['vmaglimit'])
+                #stars.loc[stars.vmag.values > intersection, 'visible'] = 0
+                stars.query('vmag < {}'.format(intersection), inplace=True)
+            else:
+                #stars.loc[stars.vmag.values < intersection, 'visible'] = 0
+                stars.query('vmag > {}'.format(intersection), inplace=True)
 
         #stars['blobSize'] = stars.apply(lambda s : getBlobsize(resp[s.maxY-25:s.maxY+26, s.maxX-25:s.maxX+26], s.response*0.1), axis=1)
 
@@ -1348,18 +1354,16 @@ def process_image(images, data, configList, args):
 
             # draw visibility limits
             x = np.linspace(-5+stars.vmag.min(), stars.vmag.max()+5, 20)
-            ulim, llim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), 
-                    list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
             y1 = 10**(x*llim[0] + llim[1])
             y2 = 10**(x*ulim[0] + ulim[1])
             ax.plot(x, y1, c='red', label='lower limit')
             ax.plot(x, y2, c='green', label='upper limit')
 
             stars.plot.scatter(x='vmag', y='response', ax=ax, logy=True, c=stars.visible.values,
-                    cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response')
+                    cmap = plt.cm.RdYlGn, grid=True, vmin=0, vmax=1, label='Kernel Response', s=40)
             ax.set_xlim((-1, float(data['vmaglimit'])+0.5))
             ax.set_ylim((
-                    10**(llim[0]*float(config['analysis']['vmaglimit'])+llim[1]),
+                    10**(llim[0]*float(config['analysis']['vmaglimit'])+llim[1]-1),
                     10**(ulim[0]*-1+ulim[1])
                     ))
             ax.set_ylabel('Kernel Response')
