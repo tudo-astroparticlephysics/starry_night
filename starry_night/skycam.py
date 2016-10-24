@@ -1075,10 +1075,6 @@ def process_image(images, data, configList, args):
     if np.rad2deg(sun.alt) > -15:
         log.info('Sun too high: {}° above horizon. We start below -15°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
         return 
-    if args['--moon']:
-        if np.rad2deg(moon.alt) > -10:
-            log.info('Moon too high: {}° above horizon. We start below -10°, current time: {}'.format(np.round(np.rad2deg(moon.alt),2), images['timestamp']))
-            return
 
     # put timestamp and hash sum into output dict
     output['timestamp'] = images['timestamp']
@@ -1200,7 +1196,7 @@ def process_image(images, data, configList, args):
                 list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
 
         # offset of upper limit can be reduced if moonlight reduces exposure time
-        if np.rad2deg(moon.alt) > 10.0:
+        if not args['--moon'] and np.rad2deg(moon.alt) > 10.0:
             ulim[1]=ulim[1] - np.log10(float(config['analysis']['moonExposureFactor']))
 
         # remove stars for all magnitudes where upperLimit < lowerLimit

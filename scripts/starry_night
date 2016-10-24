@@ -18,7 +18,7 @@ Options:
                     Using option '--ratescan' implies 'LoG'. [default: LoG]
     --vmag=<v>      Set custom magnitude limit.
     --threads=<t>   Set number of threads for multiprocessing. Can not spawn more threads than cores. [Default: 4]
-    --moon          Stop processing if moon above -10° altitude.
+    --moon          Do not correct changing exposure even if the moon shines.
 
     --cam           Display camera image
     --ratescan      Create ratescan-like plot of visibility vs kernel response threshold
