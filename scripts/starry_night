@@ -182,7 +182,7 @@ def main(args):
 
     # read positioning file if any
     if args['-p']:
-        log.info('Parsing positioning file. This might take a while')
+        log.info('Parsing positioning file.')
         try:
             data['positioning_file'] = pd.read_hdf(args['-p'], key='table')[['MJD','ra','dec']]
         except (IOError, HDF5ExtError) as e:
@@ -218,8 +218,11 @@ def main(args):
     else:
         # use image(s) provided by the user and search for directories
         # remove entries that are no valid files
+        log.info('Parsing file list. This might take a minute...')
         i = 0
         while len(args['<image>']) > i:
+            if i%2000 == 0:
+                print('{} images done'.format(i))
             # expand content of directories
             if os.path.isdir(args['<image>'][i]):
                 _dir = args['<image>'].pop(i)

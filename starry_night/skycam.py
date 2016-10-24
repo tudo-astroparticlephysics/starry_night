@@ -322,9 +322,10 @@ def find_matching_pos(img_timestamp, time_pos_list):
     we need to find out where the lidar was looking at that point in time when we took the image
     '''
     # select measurements that were taken not more than 1 min after the image and not earlyer than 10min before the image
-    subset = time_pos_list.query('-1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(img_timestamp)).sort_values('MJD')
+    subset = time_pos_list.query('-1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(Time(img_timestamp).mjd)).sort_values('MJD')
     closest = subset[subset.MJD==subset.MJD.min()]
-    return closest
+        
+    return closest[['ra','dec']]
 
 
 def obs_setup(properties):
@@ -553,7 +554,7 @@ def update_star_position(data, observer, conf, crop, args):
     points_of_interest = data['points_of_interest'].copy()
 
     if args['-p']:
-        lidar_old = find_matching_pos(Time(data['timestamp']).mjd, data['positioning_file'])
+        lidar_old = find_matching_pos(data['timestamp'], data['positioning_file'])
         lidar_old['name'] = 'Lidar'
         lidar_old['ID'] = -2
         lidar_old['radius'] = float(conf['analysis']['poi_radius'])
@@ -820,11 +821,15 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             else:
                 time = datetime.strptime(filename, fmt)
         
+        # hardcoded because filename of magic files changed in between
         except ValueError:
-            fmt = (config['properties']['timeformat'] if fmt is None else fmt)
-            log.error('{},{}'.format(filename,filepath))
-            log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
-            return
+            try:
+                time = datetime.strptime(filename, 'magic_allskyimage_%Y-%m-%d_%H-%M-%S')
+            except ValueError:
+                fmt = (config['properties']['timeformat'] if fmt is None else fmt)
+                log.error('{},{}'.format(filename,filepath))
+                log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
+                return
     time += timedelta(minutes=float(config['properties']['timeoffset']))
     img = img.astype('float32') #needs to be float because we want to set some values NaN while cropping
     return dict({'img': img, 'timestamp': time})
@@ -1252,7 +1257,6 @@ def process_image(images, data, configList, args):
         log.warning('Can not process points_of_interest if multiple kernel sizes get used')
     output['global_star_perc'] = calc_star_percentage({'altitude': np.pi/2, 'azimuth':0}, stars, float(config['image']['openingangle']), unit='deg', lim=-1, weight=True)
     output['magic_lidar'] = celObjects['lidar']
-    
     
     ##################################
     # processing done. Now plot everything
