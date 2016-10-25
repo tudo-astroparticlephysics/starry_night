@@ -824,11 +824,11 @@ def getImageDict(filepath, config, crop=None, fmt=None):
         # hardcoded because filename of magic files changed in between
         except ValueError:
             try:
-                time = datetime.strptime(filename, 'magic_allskyimage_%Y-%m-%d_%H-%M-%S')
+                time = datetime.strptime(filename, 'MAGIC_AllSkyCam_%Y-%m-%d_%H-%M-%S')
             except ValueError:
                 fmt = (config['properties']['timeformat'] if fmt is None else fmt)
                 log.error('{},{}'.format(filename,filepath))
-                log.error('Unable to parse image time from filename. Maybe format is wrong: {}'.format(fmt))
+                log.error('Unable to parse image time from filename. Maybe format is wrong: magic_allskyimage_%Y-%m-%d_%H-%M-%S')
                 return
     time += timedelta(minutes=float(config['properties']['timeoffset']))
     img = img.astype('float32') #needs to be float because we want to set some values NaN while cropping

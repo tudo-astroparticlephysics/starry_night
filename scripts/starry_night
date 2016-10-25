@@ -221,8 +221,8 @@ def main(args):
         log.info('Parsing file list. This might take a minute...')
         i = 0
         while len(args['<image>']) > i:
-            if i%2000 == 0:
-                print('{} images done'.format(i))
+            if (i+1)%2000 == 0:
+                print('Prepared {} images of {}'.format(i, len(args['<image>'])))
             # expand content of directories
             if os.path.isdir(args['<image>'][i]):
                 _dir = args['<image>'].pop(i)
