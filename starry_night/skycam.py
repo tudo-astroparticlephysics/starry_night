@@ -313,7 +313,7 @@ def horizontal2image(az, alt, cam):
         raise
     return x, y
 
-def find_matching_pos(img_timestamp, time_pos_list, observer):
+def find_matching_pos(img_timestamp, time_pos_list, conf):
     '''
     Return position of (e.g. LIDAR) in the moment the image was taken.
 
@@ -325,19 +325,30 @@ def find_matching_pos(img_timestamp, time_pos_list, observer):
     subset = time_pos_list.query('-1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(Time(img_timestamp).mjd)).sort_values('MJD')
     closest = subset[subset.MJD==subset.MJD.min()]
         
-    try:
-        return closest[['azimuth','altitude']]
-    except (KeyError):
-        log = logging.getLogger(__name__)
-        log.debug('Horizontal coords not yet calculated. Calculating...')
+    # test if equatorial is NaN or undefinded
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
         try:
-            closest['azimuth'], closest['altitude'] = equatorial2horizontal(
-                closest.ra, closest.dec, observer,
+            if closest['ra'].values != closest['ra'].values or closest['dec'] != closest['dec'].values:
+                raise KeyError
+        except (KeyError):
+            try:
+                if closest['azimuth'].values != closest['azimuth'].values or closest['altitude'].values != closest['altitude'].values:
+                    raise KeyError
+                closest['ra'], closest['dec'] = ho2eq(
+                    closest.azimuth, closest.altitude, conf['properties'], img_timestamp,
+                )
+            except (KeyError):
+                log = logging.getLogger(__name__)
+                log.error('Failed coord tranformation for find_matching_pos')
+                return
+        else:
+        # equatorial is definded
+            closest['azimuth'], closest['altitude'] = eq2ho(
+                closest.ra, closest.dec, conf['properties'], img_timestamp
             )
-            return closest[['azimuth','altitude']]
-        except (ValueError,AttributeError):
-            log.error('Failed to return matching position because neither ra,dec nor azimuth,altitude key were passed as input keys.')
-            return
+        return closest[['azimuth','altitude','ra','dec']]
+
 
 
 
@@ -575,7 +586,7 @@ def update_star_position(data, observer, conf, crop, args):
     )
 
     if args['-p']:
-        lidar_old = find_matching_pos(data['timestamp'], data['positioning_file'], observer)
+        lidar_old = find_matching_pos(data['timestamp'], data['positioning_file'], conf)
         lidar_old['name'] = 'Lidar'
         lidar_old['ID'] = -2
         lidar_old['radius'] = float(conf['analysis']['poi_radius'])
