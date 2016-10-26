@@ -323,14 +323,6 @@ def main(args):
 
 
     if args['--airmass']:
-        '''
-        new_df['erwartet'] = 10**skycam.lin(new_df.vmag.values, popt[0], popt[1])
-        new_df['diff'] = new_df['response'] / new_df['erwartet']
-        new_df['diff2'] = (new_df['response'] / new_df['erwartet'])**(1/new_df['erwartet'])
-
-        a = df.query('altitude > {}'.format(80*np.pi/180)).groupby('HIP').filter(lambda x : len(x) > 10).groupby('HIP').response.mean()
-        a = df.join(a, on='HIP', rsuffix='r').dropna()
-        '''
         r = []
         grouped = df.groupby('HIP')
         # fit transmission for each star

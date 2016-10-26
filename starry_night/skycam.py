@@ -58,7 +58,6 @@ def LoG(x,y,sigma):
     Return discretized Laplacian of Gaussian kernel.
     Mean = 0 normalized and scale invarian by multiplying with sigma**2
     '''
-
     kernel = 1/(np.pi*sigma**4)*(1-(x**2+y**2)/(2*sigma**2))*np.exp(-(x**2+y**2)/(2*sigma**2))
     kernel -= np.mean(kernel)
     return kernel * sigma**2
@@ -133,15 +132,14 @@ def getMagicLidar(passwd):
     else:
         log.error('Wrong lidar password')
         return
-    dateValues = list(map(lambda dataString : int(sub("[a-zA-Z]+", "", dataString)), (split('\n',dataString)[7:-1])))
-    lidarData = list(map(lambda dataString : float(sub(".*\s", "", dataString)), (split('\n',dataString)[:6])))
-    timestamp = datetime(*dateValues[3:6], *dateValues[:3])
+    values = list(map(float, re.findall("\d+\.\d+|\d+", dataString)))
+    timestamp = datetime(*list(map(int,values[-3:])), *list(map(int,values[-6:-3])))
 
     # abort if last lidar update was more than 15min ago
     if datetime.utcnow() - timestamp > timedelta(minutes=15):
         return
     else:
-        return {'timestamp': timestamp, 'altitude': (90-lidarData[0])/180*np.pi, 'azimuth': lidarData[1]/180*np.pi, 'T3':lidarData[2], 'T6':lidarData[3], 'T9':lidarData[4], 'T12':lidarData[5]}
+        return {'timestamp': timestamp, 'altitude': (90-values[0])/180*np.pi, 'azimuth': values[1]/180*np.pi, 'T3':values[3], 'T6':values[5], 'T9':values[7], 'T12':values[9]}
 
 def downloadImg(url, timeout=None):
     '''
@@ -192,7 +190,6 @@ def downloadImg(url, timeout=None):
         timestamp = datetime.strptime(
                         hdulist[0].header['UTC'],
                         '%Y/%m/%d %H:%M:%S')
-
     else:
         img = rgb2gray(imread(url, ))
         timestamp = get_last_modified(url, timeout=timeout)
@@ -327,7 +324,6 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
 
     if closest.empty:
         return dict()
-
         
     # test if equatorial is NaN or undefinded
     with warnings.catch_warnings():
@@ -351,10 +347,8 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
             closest['azimuth'], closest['altitude'] = eq2ho(
                 closest.ra, closest.dec, conf['properties'], img_timestamp
             )
+        logging.getLogger(__name__).debug('Found match')
         return closest[['azimuth','altitude','ra','dec']]
-
-
-
 
 
 def obs_setup(properties):
@@ -589,6 +583,7 @@ def update_star_position(data, observer, conf, crop, args):
         points_of_interest.ra, points_of_interest.dec, observer,
     )
 
+    log.debug('Find matching postition')
     if args['-p']:
         lidar_old = find_matching_pos(data['timestamp'], data['positioning_file'], conf)
         lidar_old['name'] = 'Lidar'
@@ -979,8 +974,6 @@ def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
                 np.sum(np.power(100**(1/5),-starsInRange.vmag.values))
         else:
             percentage = np.mean(starsInRange.visible.values)
-
-
     return np.float64(percentage)
 
 
@@ -1011,7 +1004,7 @@ def calc_cloud_map(stars, rng, img_shape, weight=False):
     with np.errstate(divide='ignore',invalid='ignore'):
         # density has some entries close to 0 which will result in artifacts after division.
         # replace them with 1 so that small number / 1 ~ 0
-        density_all[density_all < 10*-10]=1
+        density_all[density_all < 10**-10]=1
         cloud_map = np.true_divide(density_visible, density_all)
         cloud_map[~np.isfinite(cloud_map)] = 0
     return 1-cloud_map
@@ -1199,8 +1192,6 @@ def process_image(images, data, configList, args):
         # to correct abberation the max filter response withing tolerance distance around a star will be chosen as 'real' star position 
         # there should be no need for this to be bigger than the diameter of the bigger stars because this means that the transformation we use is quite bad
         # and a bright star next to the real star might be detected by error
-        
-
         tolerance = int(config['analysis']['pixelTolerance'])
         log.debug('Calculate Filter response')
         
@@ -1263,8 +1254,6 @@ def process_image(images, data, configList, args):
 
         # append results
         kernelResults.append(stars)
-
-
 
     del stars
     try:
