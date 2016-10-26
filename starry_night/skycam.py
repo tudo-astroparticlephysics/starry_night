@@ -326,7 +326,7 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
     closest = subset[subset.MJD==subset.MJD.min()]
 
     if closest.empty:
-        return
+        return dict()
 
         
     # test if equatorial is NaN or undefinded
@@ -345,7 +345,7 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
             except (KeyError):
                 log = logging.getLogger(__name__)
                 log.error('Failed coord tranformation for find_matching_pos')
-                return
+                return dict()
         else:
         # equatorial is definded
             closest['azimuth'], closest['altitude'] = eq2ho(
