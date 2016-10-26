@@ -313,19 +313,33 @@ def horizontal2image(az, alt, cam):
         raise
     return x, y
 
-def find_matching_pos(img_timestamp, time_pos_list):
+def find_matching_pos(img_timestamp, time_pos_list, observer):
     '''
-    Returns 'Ra' and 'Dec' entry from 'time_pos_list' 
-    that has the closest timestamp to 'img_timestamp'+5min
+    Return position of (e.g. LIDAR) in the moment the image was taken.
 
-    Since the lidar operates all the time but we only take images every few minutes 
-    we need to find out where the lidar was looking at that point in time when we took the image
+    Returns entry from 'time_pos_list' that has the closest timestamp to 'img_timestamp'.
+    Tolerance: +10min into futur ,-1min past. Because LIDAR result is based on 10min measurement.
+
+    Converts coordinates in horizontal coords.
     '''
-    # select measurements that were taken not more than 1 min after the image and not earlyer than 10min before the image
     subset = time_pos_list.query('-1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(Time(img_timestamp).mjd)).sort_values('MJD')
     closest = subset[subset.MJD==subset.MJD.min()]
         
-    return closest[['ra','dec']]
+    try:
+        return closest[['azimuth','altitude']]
+    except (KeyError):
+        log = logging.getLogger(__name__)
+        log.debug('Horizontal coords not yet calculated. Calculating...')
+        try:
+            closest['azimuth'], closest['altitude'] = equatorial2horizontal(
+                closest.ra, closest.dec, observer,
+            )
+            return closest[['azimuth','altitude']]
+        except (ValueError,AttributeError):
+            log.error('Failed to return matching position because neither ra,dec nor azimuth,altitude key were passed as input keys.')
+            return
+
+
 
 
 def obs_setup(properties):
@@ -553,19 +567,20 @@ def update_star_position(data, observer, conf, crop, args):
     stars = data['stars'].copy()
     points_of_interest = data['points_of_interest'].copy()
 
-    if args['-p']:
-        lidar_old = find_matching_pos(data['timestamp'], data['positioning_file'])
-        lidar_old['name'] = 'Lidar'
-        lidar_old['ID'] = -2
-        lidar_old['radius'] = float(conf['analysis']['poi_radius'])
-        points_of_interest = points_of_interest.append(lidar_old, ignore_index=True)
-
     stars['azimuth'], stars['altitude'] = equatorial2horizontal(
         stars.ra, stars.dec, observer,
     )
     points_of_interest['azimuth'], points_of_interest['altitude'] = equatorial2horizontal(
         points_of_interest.ra, points_of_interest.dec, observer,
     )
+
+    if args['-p']:
+        lidar_old = find_matching_pos(data['timestamp'], data['positioning_file'], observer)
+        lidar_old['name'] = 'Lidar'
+        lidar_old['ID'] = -2
+        lidar_old['radius'] = float(conf['analysis']['poi_radius'])
+        points_of_interest = points_of_interest.append(lidar_old, ignore_index=True)
+
     # Get the magic Lidar
     magicLidar_now = None
     if data['lidarpwd']:

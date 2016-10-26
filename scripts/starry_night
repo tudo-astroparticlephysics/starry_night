@@ -184,7 +184,7 @@ def main(args):
     if args['-p']:
         log.info('Parsing positioning file.')
         try:
-            data['positioning_file'] = pd.read_hdf(args['-p'], key='table')[['MJD','ra','dec']]
+            data['positioning_file'] = pd.read_hdf(args['-p'], key='table')
         except (IOError, HDF5ExtError) as e:
             log.error(e.args[0])
             sys.exit(1)
@@ -222,7 +222,7 @@ def main(args):
         i = 0
         while len(args['<image>']) > i:
             if (i+1)%2000 == 0:
-                print('Prepared {} images of {}'.format(i, len(args['<image>'])))
+                print('Prepared {} images of {}'.format(i+1, len(args['<image>'])))
             # expand content of directories
             if os.path.isdir(args['<image>'][i]):
                 _dir = args['<image>'].pop(i)
