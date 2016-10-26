@@ -198,7 +198,7 @@ def main(args):
             try:
                 img = skycam.downloadImg(
                     config['properties']['url'],
-                    timeout=5,
+                    timeout=10,
                 )
                 log.debug('Download finished')
             except skycam.TooEarlyError as e:

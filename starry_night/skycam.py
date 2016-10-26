@@ -32,7 +32,7 @@ from os.path import join
 import requests
 import logging
 
-from re import split, sub
+from re import split,findall
 from hashlib import sha1
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError, InternalError
@@ -132,7 +132,7 @@ def getMagicLidar(passwd):
     else:
         log.error('Wrong lidar password')
         return
-    values = list(map(float, re.findall("\d+\.\d+|\d+", dataString)))
+    values = list(map(float, findall("\d+\.\d+|\d+", dataString)))
     timestamp = datetime(*list(map(int,values[-3:])), *list(map(int,values[-6:-3])))
 
     # abort if last lidar update was more than 15min ago
