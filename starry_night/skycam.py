@@ -329,11 +329,11 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         try:
-            if closest['ra'].values != closest['ra'].values or closest['dec'] != closest['dec'].values:
+            if any(closest['ra'] != closest['ra'] or closest['dec'] != closest['dec']):
                 raise KeyError
         except (KeyError):
             try:
-                if closest['azimuth'].values != closest['azimuth'].values or closest['altitude'].values != closest['altitude'].values:
+                if any (closest['azimuth'] != closest['azimuth'] or closest['altitude'] != closest['altitude']):
                     raise KeyError
                 closest['ra'], closest['dec'] = ho2eq(
                     closest.azimuth, closest.altitude, conf['properties'], img_timestamp,
