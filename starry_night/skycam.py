@@ -324,16 +324,20 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
     '''
     subset = time_pos_list.query('-1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(Time(img_timestamp).mjd)).sort_values('MJD')
     closest = subset[subset.MJD==subset.MJD.min()]
+
+    if closest.empty:
+        return
+
         
     # test if equatorial is NaN or undefinded
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         try:
-            if any(closest['ra'] != closest['ra'] or closest['dec'] != closest['dec']):
+            if any(closest['ra'] != closest['ra']) or any(closest['dec'] != closest['dec']):
                 raise KeyError
         except (KeyError):
             try:
-                if any (closest['azimuth'] != closest['azimuth'] or closest['altitude'] != closest['altitude']):
+                if any (closest['azimuth'] != closest['azimuth']) or any(closest['altitude'] != closest['altitude']):
                     raise KeyError
                 closest['ra'], closest['dec'] = ho2eq(
                     closest.azimuth, closest.altitude, conf['properties'], img_timestamp,
