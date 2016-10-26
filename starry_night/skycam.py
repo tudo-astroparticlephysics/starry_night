@@ -771,7 +771,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
     filetype= filepath.split('.')[-1]
 
     if stat(filepath).st_size == 0:
-        log.error('Image has size 0, aborting!')
+        log.error('Image has size 0, aborting!: {}'.format(filepath))
         return
     # is it a matlab file?
     if filetype == 'mat':
@@ -841,10 +841,13 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             try:
                 time = datetime.strptime(filename, 'MAGIC_AllSkyCam_%Y-%m-%d_%H-%M-%S')
             except ValueError:
-                fmt = (config['properties']['timeformat'] if fmt is None else fmt)
-                log.error('{},{}'.format(filename,filepath))
-                log.error('Unable to parse image time from filename. Maybe format is wrong: magic_allskyimage_%Y-%m-%d_%H-%M-%S')
-                return
+                try:
+                    time = datetime.strptime(filename, 'magic_allskycam_%Y%m%d_%H%M%S')
+                except ValueError:
+                    fmt = (config['properties']['timeformat'] if fmt is None else fmt)
+                    log.error('{},{}'.format(filename,filepath))
+                    log.error('Unable to parse image time from filename. Maybe format string is wrong.')
+                    return
     time += timedelta(minutes=float(config['properties']['timeoffset']))
     img = img.astype('float32') #needs to be float because we want to set some values NaN while cropping
     return dict({'img': img, 'timestamp': time})
