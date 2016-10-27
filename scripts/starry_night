@@ -232,10 +232,10 @@ def main(args):
             else:
                 # remove invalid files
                 if os.path.isfile(args['<image>'][i]):
-                    # remove files with wrong filter (this is a temporary code snippet, remove later!!!)
-                    #if bool(search('_[234]\.', args['<image>'][i])):
-                        #args['<image>'].pop(i)
-                        #continue
+                    #remove files with wrong filter (this is a temporary code snippet, remove later!!!)
+                    if bool(search('_[234]\.', args['<image>'][i])):
+                        args['<image>'].pop(i)
+                        continue
                     i += 1
                 else:
                     args['<image>'].pop(i)
