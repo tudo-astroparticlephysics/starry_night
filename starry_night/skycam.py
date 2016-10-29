@@ -41,7 +41,6 @@ import requests.exceptions as rex
 from IPython import embed
 
 
-
 def degDist(ra1, ra2, dec1, dec2):
     '''
     Returns great circle distance between two points on a sphere in degree.
@@ -983,27 +982,27 @@ def calc_cloud_map(stars, rng, img_shape, weight=False):
             rng - sigma of gaussian kernel (integer)
             img_shape - size of cloudiness map in pixel (tuple)
             weight - use magnitude as weight or not (boolean)
-    Returns: Cloudines map of the sky. 1=cloud, 0=clear sky
+    Returns: Cloud map of the sky. 1=cloud, 0=clear sky
 
     Cloudiness is percentage of visible stars in local area. Stars get weighted by
-    distance (gaussian) and star magnitude 2.5^magnitude.
+    distance (gaussian) and star magnitude 2.5^-magnitude.
     Instead of a computationally expensive for-loop we use two 2D histograms of the stars (weighted)
     and convolve them with an gaussian kernel resulting in some kind of 'density map'.
     Division of both maps yields the desired cloudines map.
     '''
     if weight:
         scattered_stars_visible,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=stars.visible.values * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
-        scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, weights=np.ones(len(stars.index)) * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=np.ones(len(stars.index)) * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
         density_visible = skimage.filters.gaussian(scattered_stars_visible, rng)
         density_all = skimage.filters.gaussian(scattered_stars, rng)
     else:
         scattered_stars_visible,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=stars.visible.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
-        scattered_stars,_,_ = np.histogram2d(stars.y.values, stars.x.values, weights=np.ones(len(stars.index)), bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=np.ones(len(stars.index)), bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
         density_visible = skimage.filters.gaussian(scattered_stars_visible, rng, mode='mirror')
         density_all = skimage.filters.gaussian(scattered_stars, rng, mode='mirror')
     with np.errstate(divide='ignore',invalid='ignore'):
         # density has some entries close to 0 which will result in artifacts after division.
-        # replace them with 1 so that small number / 1 ~ 0
+        # replace them with 1 so that: small number / 1 ~ 0
         density_all[density_all < 10**-10]=1
         cloud_map = np.true_divide(density_visible, density_all)
         cloud_map[~np.isfinite(cloud_map)] = 0
@@ -1071,6 +1070,9 @@ def process_image(images, data, configList, args):
 
     Use this in the main loop!
     '''
+    font = {'size'   : 25}
+    rc('font', **font)
+
     log = logging.getLogger(__name__)
 
     output = dict()
@@ -1506,21 +1508,27 @@ def process_image(images, data, configList, args):
             output['cloudmap'] = cloud_map
             np.save('cMap_{}'.format(output['timestamp']), np.nan_to_num(cloud_map))
         if args['--cloudmap']:
-            ax1 = plt.subplot(121)
+            fig = plt.figure(figsize=(16,9))
+            ax1 = fig.add_subplot(121)
             vmin = np.nanpercentile(img, 5.5)
-            vmax = np.nanpercentile(img, 98.0)
+            vmax = np.nanpercentile(img, 99.9)
             ax1.imshow(img, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
+            ax1.set_ylabel('$y$ / px')
             ax1.grid()
+            '''
             ax1.text(0.98, 0.02, str(output['timestamp']),
                 verticalalignment='bottom', horizontalalignment='right',
                 transform=ax1.transAxes,
                 backgroundcolor='black',
                 color='white', fontsize=15,
             )
-
-            ax2 = plt.subplot(122)
+            '''
+            ax2 = fig.add_subplot(122)
             ax2.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
             ax2.grid()
+            ax2.set_yticks([])
+            fig.text(0.53, 0.02, '$x$ / px', ha='center')
+            plt.tight_layout(h_pad=-0.1)
             if args['-s']:
                 plt.savefig('cloudMap_{}.png'.format(images['timestamp'].isoformat()))
             if args['-v']:
@@ -1530,7 +1538,7 @@ def process_image(images, data, configList, args):
             ax = plt.subplot(111)
             ax.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
             ax.grid()
-            plt.savefig('cloudMap_{}.png'.format(config['properties']['name']),dpi=200)
+            plt.savefig('cloudMap_{}.png'.format(config['properties']['name']),dpi=400)
     try:
         output['global_coverage'] = np.nanmean(cloudmap)
     except NameError:
