@@ -424,12 +424,12 @@ def celObjects_dict(config):
             comment='#',
             header=0,
             skipinitialspace=False,
-            index_col=0,
         )
     except OSError as e:
         log.error('Star catalogue not found: {}'.format(e))
         sys.exit(1)
     #stars = stars.to_numeric()
+    stars.set_index('HIP', drop=True)
 
     # transform degrees to radians
     stars.ra = np.deg2rad(stars.ra)
@@ -1234,7 +1234,7 @@ def process_image(images, data, configList, args):
         if ulim[0] != llim[0]:
             intersection = (llim[1] - ulim[1]) / (ulim[0] - llim[0])
             if ulim[0] < llim[0]:
-                data['vmaglimit'] = max(intersection, data['vmaglimit'])
+                data['vmaglimit'] = min(intersection, data['vmaglimit'])
                 #stars.loc[stars.vmag.values > intersection, 'visible'] = 0
                 stars.query('vmag < {}'.format(intersection), inplace=True)
             else:

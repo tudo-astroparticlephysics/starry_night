@@ -71,7 +71,7 @@ class CloudTracker:
 
     def __transform_map(self, cloudmap):
         '''
-        Project fish eye lens image onto flat atmosphere
+        Projection of fish eye lens image onto flat atmosphere
         transformed = np.zeros(1000,1000)
         X,Y = np.meshgrid(range(int(self.config['zenith_X'])), range(int(self.config['zenith_X'])))
 
@@ -111,7 +111,7 @@ class CloudTracker:
         self.log.debug('Calculate cloud movement')
         print('calc')
         minVal = np.inf
-        rotation = (0,0)
+        translation = (0,0)
         # shift the image and calculate the overlap value
         for shift_x in np.arange(-map1.shape[0]//2//2 , map1.shape[0]//2//2, max([map1.shape[0]//20, 1])):
             for shift_y in np.arange(-map1.shape[1]//2//2 , map1.shape[1]//2//2, max([map1.shape[1]//20, 1])):
@@ -119,33 +119,48 @@ class CloudTracker:
                 temp = np.nanmean((map1 - shifted_map)**2)
                 if temp < minVal:
                     minVal = temp
-                    rotation = (shift_x,shift_y)
+                    translation = (shift_x,shift_y)
                 if temp <= 0:
                     break
-        return rotation[::-1], minVal
+        return translation[::-1], minVal
 
     def print_clouds(self):
         print('Currently {} images loaded'.format(len(self.maps)))
-        fig = plt.figure(figsize=(6,15))
-        plt.title('Current image - previous image shifted')
-        plt.axis('off')
         print('Wind:', self.wind_direction)
         for cnt, (i,j) in enumerate(zip(self.maps, self.trans_maps)):
-            fig.add_subplot(len(self.maps), 2, 2*cnt+1)
-            plt.gca().imshow(i, vmin=0, vmax=1)
+            fig = plt.figure(figsize=(10,5))
+            ax1 = fig.add_subplot(121)
+            ax1.set_ylabel('$y$ / px')
+            ax1.imshow(i, vmin=0, vmax=1)
+            ax1.grid()
             if self.wind_direction[cnt] != None:
-                plt.gca().arrow(i.shape[0]//2, i.shape[1]//2, self.wind_direction[cnt][0], self.wind_direction[cnt][1], color='yellow', lw=5, label='Wind direction estimated')
-                plt.gca().set_ylabel(self.timestamps[cnt], rotation='horizontal', labelpad=55)
-            fig.add_subplot(len(self.trans_maps), 2, 2*cnt+2)
+                ax1.arrow(i.shape[0]//2, i.shape[1]//2,
+                        self.wind_direction[cnt][0], self.wind_direction[cnt][1],
+                        color='yellow',
+                        lw=7,
+                        head_width=20,
+                        label='Wind direction estimated'
+                )
+                ax1.legend(loc='upper right')
+            ax2 = fig.add_subplot(122)
             if self.pred_map[cnt] != None:
                 pred = self.pred_map[cnt]
-                plt.gca().imshow(self.pred_map[cnt], vmin=0, vmax=1)
+                ax2.imshow(self.pred_map[cnt], vmin=0, vmax=1)
             else:
-                plt.gca().imshow(np.ones(self.maps[0].shape), vmin=0, vmax=1)
-        plt.legend(loc='best')
-        plt.tight_layout()
-        plt.savefig('cloud_movement.png') 
-        plt.show()
+                ax2.imshow(np.ones(self.maps[0].shape), vmin=0, vmax=1)
+            ax2.grid()
+            ax1.set_xticklabels([])
+            ax2.set_xticklabels([])
+            #fig.text(0.53, 0.02, '$x$ / px', ha='center')
+            ax2.set_yticklabels([])
+            ax2.yaxis.set_label_position("right")
+            ax2.set_ylabel(self.timestamps[cnt].isoformat().replace('T', ' '), rotation=90, labelpad=10)
+            #plt.title('Current image - previous image shifted')
+            fig.tight_layout(h_pad=-0.05)
+            plt.savefig('cloud_movement_{}.png'.format(self.timestamps[cnt].isoformat()),  bbox_inches='tight',) 
+            #plt.show()
+        plt.close('all')
+        embed()
 
     def predict_next_cloudmap(self, wind_x, wind_y, prev_map):
         '''
@@ -154,9 +169,11 @@ class CloudTracker:
         '''
         shifted_map = self.__shift_and_crop(prev_map, wind_x, wind_y)
         wind_speed = np.sqrt(wind_x**2+wind_y**2)
-        wind_steps = wind_speed//self.config['image']['radius']
-        shifted_map[np.isnan(shifted_map)] = prev_map[np.isnan(shifted_map)]
+        wind_steps = wind_speed//int(self.config['image']['radius'])
+        #dont fill empty space with previous cloud map because it looks bad
+        #shifted_map[np.isnan(shifted_map)] = prev_map[np.isnan(shifted_map)]
         self.pred_map.append(shifted_map)
+        self.wind_speed.append(wind_speed)
 
     def update(self, cloudmap, timestamp):
         '''
@@ -170,9 +187,11 @@ class CloudTracker:
         self.__add_cloud(cloudmap, timestamp)
 
         if len(self.maps) > 1:
-            direct, val = self.__calculate_movement(self.trans_maps[-1], self.trans_maps[-2])
+            direct, match_val = self.__calculate_movement(self.trans_maps[-1], self.trans_maps[-2])
             self.wind_direction.append(direct)
-            self.predict_next_cloudmap(direct[0], direct[1], self.trans_maps[-1])
+            self.predict_next_cloudmap(direct[0], direct[1], self.trans_maps[-2])
+            # need self.trans_maps[-2] to create plot for master thesis. return to -1 later!!!
+            #self.predict_next_cloudmap(direct[0], direct[1], self.trans_maps[-1])
 
         # drop oldest value if more than max_maps are in memory
         if (len(self.maps) > self.max_maps):

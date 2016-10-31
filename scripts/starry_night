@@ -290,7 +290,12 @@ def main(args):
     if args['--cloudtrack']:
         cloudmap_list = list(map(lambda x: x['cloudmap'], results)), timestamp_list
 
-    df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
+
+    #df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
+    df = pd.concat(star_list)
+    df = df.groupby('HIP').filter(lambda x : len(x.index) > 5)
+    mean = df.groupby('HIP').mean()
+    std = df.groupby('HIP').std()
 
     del results
     del star_list
@@ -300,12 +305,6 @@ def main(args):
     #d.loc[(slice(None), 746), :]
     #d.loc[(slice(None), 746),:]['response3'].plot.hist(10)
 
-    mean = df.mean(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
-    std = df.std(level=1)[df.count(level=1)['vmag'].values > len(df.index.levels[0])/2]
-
-    # we need a big data set for averaging, so only stars with > 10 data points are allowed
-    df.reset_index(inplace=True)
-    df = df.groupby('HIP').filter(lambda x : len(x.index) > 10)
 
 
     #####################################################
@@ -525,9 +524,11 @@ def main(args):
     
     if args['--cloudtrack']:
         embed()
+        sys.exit(1)
         ct = cloud_tracker.CloudTracker(config)
-        for cloudmap in cloudmap_list:
-            ct.update(cloudmap)
+        for cmap,timestamp in zip(cloudmap_list[0], cloudmap_list[1]):
+            ct.update(cmap,timestamp)
+
 
         print('Tracking done')
     
