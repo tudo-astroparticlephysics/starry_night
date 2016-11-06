@@ -428,7 +428,6 @@ def celObjects_dict(config):
     except OSError as e:
         log.error('Star catalogue not found: {}'.format(e))
         sys.exit(1)
-    #stars = stars.to_numeric()
     stars.set_index('HIP', drop=True)
 
     # transform degrees to radians
@@ -1317,7 +1316,7 @@ def process_image(images, data, configList, args):
         gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
         ax = plt.subplot(gs[0])
         for _, s in gr:
-            # dont plot feint stars
+            # dont plot faint stars
             popt, pcov = curve_fit(expo, s.vmag.values, s.response_orig.values)
             res.append((s.kernel.max(),*popt, np.sqrt(pcov[0,0]), np.sqrt(pcov[1,1])))
         res = np.array(res)
@@ -1515,14 +1514,12 @@ def process_image(images, data, configList, args):
             ax1.imshow(img, vmin=vmin, vmax=vmax, cmap='gray', interpolation='none')
             ax1.set_ylabel('$y$ / px')
             ax1.grid()
-            '''
             ax1.text(0.98, 0.02, str(output['timestamp']),
                 verticalalignment='bottom', horizontalalignment='right',
                 transform=ax1.transAxes,
                 backgroundcolor='black',
                 color='white', fontsize=15,
             )
-            '''
             ax2 = fig.add_subplot(122)
             ax2.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
             ax2.grid()

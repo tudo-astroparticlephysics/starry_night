@@ -232,10 +232,6 @@ def main(args):
             else:
                 # remove invalid files
                 if os.path.isfile(args['<image>'][i]):
-                    #remove files with wrong filter (this is a temporary code snippet, remove later!!!)
-                    if bool(search('_[234]\.', args['<image>'][i])):
-                        args['<image>'].pop(i)
-                        continue
                     i += 1
                 else:
                     args['<image>'].pop(i)
@@ -420,15 +416,12 @@ def main(args):
         ax.set_ylim((47,42000))
         ax.grid()
         ax.legend(loc='upper right')
-        plt.show()
-        '''
         plt.gca().text(0.98, 0.02, 'Fit result: $T(X)=e^{{-{}\cdot X}}$'.format(round(coefficient,4)),
             verticalalignment='bottom', horizontalalignment='right',
             transform=plt.gca().transAxes,
             backgroundcolor='white',
             color='black', fontsize=25,
         )
-        '''
         if args['-s']:
             plt.savefig('airmass_absorbtion_{}'.format(config['properties']['name']), dpi=200)
         if args['-v']:
