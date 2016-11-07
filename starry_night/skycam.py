@@ -1234,8 +1234,8 @@ def process_image(images, data, configList, args):
             intersection = (llim[1] - ulim[1]) / (ulim[0] - llim[0])
             if ulim[0] < llim[0]:
                 data['vmaglimit'] = min(intersection, data['vmaglimit'])
-                #stars.loc[stars.vmag.values > intersection, 'visible'] = 0
-                stars.query('vmag < {}'.format(intersection), inplace=True)
+                #stars.loc[stars.vmag.values > data['vmaglimit'], 'visible'] = 0
+                stars.query('vmag < {}'.format(data['vmaglimit']), inplace=True)
             else:
                 #stars.loc[stars.vmag.values < intersection, 'visible'] = 0
                 stars.query('vmag > {}'.format(intersection), inplace=True)

@@ -345,11 +345,11 @@ def main(args):
 
         fig = plt.figure(figsize=(16,9))
         ax = fig.add_subplot(111)
-        plt.errorbar(r[:,0], r[:,3], yerr=r[:,4], linestyle='', color='blue', marker='o', ms=2)
+        plt.errorbar(r[:,0], r[:,3], yerr=r[:,4], linestyle='', color='blue', marker='o', ms=6)
         plt.plot(x, y, color='red', label='linear regression')
         plt.xlim((-0.5,6.5))
         plt.ylim((-1,2))
-        plt.xlabel('Max observed star altitude')
+        plt.xlabel('Star Magnitude')
         plt.ylabel('Air mass coefficient')
         '''
         plt.gca().text(0.98, 0.02, 'Weighted average: {}'.format(round(coefficient,4)),
@@ -393,7 +393,7 @@ def main(args):
             # get star with magnitude closest to 'vmag'
             to_plot = plot_df.query(
                     'HIP == {}'.format(
-                    plot_df.ix[(plot_df.vmag-vmag).abs().sort(inplace=False).index[0]].HIP
+                    max(plot_df.ix[(plot_df.vmag-vmag).abs().sort(inplace=False).index[0]].HIP)
                 )
             ).sort_values('altitude')
 
@@ -406,16 +406,17 @@ def main(args):
             popt, pcov = curve_fit(skycam.transmission3, to_plot.altitude.values, to_plot.response_orig.values, p0=[0,0.57])
 
             ax.scatter(x=90-np.rad2deg(to_plot['altitude']), y=to_plot['response_orig'], c=c, label='mag = {}'.format(to_plot.vmag.max()))
-            ax.plot(90-np.rad2deg(to_plot.altitude), skycam.transmission3(to_plot.altitude.values, popt[0], coefficient), c=c)
+            ax.plot(90-np.rad2deg(to_plot.altitude), skycam.transmission3(to_plot.altitude.values, popt[0], popt[1]), c=c)
             print(vmag, to_plot.HIP.max(), popt)
 
         ax.semilogy()
         ax.set_xlabel('Zenith angle')
         ax.set_ylabel('Response')
-        ax.set_xlim((0,95))
+        ax.set_xlim((0,115))
         ax.set_ylim((47,42000))
         ax.grid()
         ax.legend(loc='upper right')
+        plt.setp(plt.gca().get_legend().get_texts(), fontsize='22')
         plt.gca().text(0.98, 0.02, 'Fit result: $T(X)=e^{{-{}\cdot X}}$'.format(round(coefficient,4)),
             verticalalignment='bottom', horizontalalignment='right',
             transform=plt.gca().transAxes,
