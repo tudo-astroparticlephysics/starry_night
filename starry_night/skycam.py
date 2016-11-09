@@ -106,11 +106,16 @@ class TooEarlyError(Exception):
     pass
 
 def get_last_modified(url, timeout):
-    ret = requests.head(url, timeout=timeout)
-    date = datetime.strptime(
-        ret.headers['Last-Modified'],
-        '%a, %d %b %Y %H:%M:%S GMT'
-    )
+    try:
+        ret = requests.head(url, timeout=timeout)
+        date = datetime.strptime(
+            ret.headers['Last-Modified'],
+            '%a, %d %b %Y %H:%M:%S GMT'
+        )
+    except (rex.ReadTimeout, KeyError):
+        log = logging.getLogger(__name__)
+        log.error('Failed to retrieve timestamp from {} because website can not be reached.\nRetry later...'.format(url))
+        date = None
     return date
 
 def getMagicLidar(passwd):
@@ -157,7 +162,9 @@ def downloadImg(url, timeout=None):
 
     # only download if time since last image is > than wait
     mod = get_last_modified(url, timeout=timeout)
-    if downloadImg.lastMod == mod:
+    if not mod:
+        return dict()
+    elif mod <= downloadImg.lastMod:
         raise TooEarlyError()
     else:
         downloadImg.lastMod = mod
@@ -192,6 +199,8 @@ def downloadImg(url, timeout=None):
     else:
         img = rgb2gray(imread(url, ))
         timestamp = get_last_modified(url, timeout=timeout)
+        if not timestamp:
+            return dict()
         
     return {
         'img' : img,
