@@ -106,11 +106,21 @@ class TooEarlyError(Exception):
     pass
 
 def get_last_modified(url, timeout):
-    ret = requests.head(url, timeout=timeout)
-    date = datetime.strptime(
-        ret.headers['Last-Modified'],
-        '%a, %d %b %Y %H:%M:%S GMT'
-    )
+    try:
+        ret = requests.head(url, timeout=timeout)
+    except requests.exceptions.ReadTimeout:
+        log.error('Request timed out. Try again in 30 s')
+        return None
+
+    log.info("last modified: {}".format(ret.headers['Last-Modified']))
+    try:
+        date = datetime.strptime(
+            ret.headers['Last-Modified'],
+            '%a, %d %b %Y %H:%M:%S GMT'
+        )
+    except ValueError:
+        log.error("Cannot parse header")
+        return None
     return date
 
 def getMagicLidar(passwd):
@@ -157,7 +167,7 @@ def downloadImg(url, timeout=None):
 
     # only download if time since last image is > than wait
     mod = get_last_modified(url, timeout=timeout)
-    if downloadImg.lastMod == mod:
+    if (mod != None) and (downloadImg.lastMod == mod):
         raise TooEarlyError()
     else:
         downloadImg.lastMod = mod
