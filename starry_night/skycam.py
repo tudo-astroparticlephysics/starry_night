@@ -40,6 +40,8 @@ import requests.exceptions as rex
 
 from IPython import embed
 
+log = logging.getLogger(__name__)
+
 
 def degDist(ra1, ra2, dec1, dec2):
     '''
