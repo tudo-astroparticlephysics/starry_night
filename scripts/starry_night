@@ -56,6 +56,7 @@ from re import split, search
 from getpass import getpass
 from sqlalchemy import create_engine
 import os
+import requests
 
 from sqlalchemy.exc import OperationalError, InternalError
 import requests.exceptions as rex
@@ -209,7 +210,9 @@ def main(args):
                 log.error('Download of image failed. Try again in 30 s. {}'.format(e))
                 time.sleep(30)
                 continue
-                
+            except requests.exceptions.ReadTimeout:
+                log.exception('Request timed out. Try again in 30 s')
+
             results.append(skycam.process_image(img, data, configList, args))
             if not args['--daemon']:
                 log.info('Do not download any more images because option --daemon is not set')
