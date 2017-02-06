@@ -22,14 +22,14 @@ Options:
 
     --cam           Display camera image
     --ratescan      Create ratescan-like plot of visibility vs kernel response threshold
-    --response      Plot response vs Magnitude in log scale 
+    --response      Plot response vs Magnitude in log scale
     --cloudmap      Create cloud map of the sky
     --cloudtrack    Track and predict clouds as they move
     --single        Display information for every single image
     --airmass       Calculate airmass absorbtion
     --sql           Store results in SQL database
-    --low-memory    Don't store results of each image in memory for final processing. 
-                    Use this option if you are not planning to merge the results because the 
+    --low-memory    Don't store results of each image in memory for final processing.
+                    Use this option if you are not planning to merge the results because the
                     amount of files is too big or because you run this as a daemon at night.
     --daemon        Run as daemon during the night, no input possible.
     --version       Show version.
@@ -89,7 +89,7 @@ logfile_handler = logging.FileHandler(filename=logfile_path, mode='w')
 logfile_handler.setLevel(logging.ERROR)
 logstream_handler = logging.StreamHandler()
 formatter = logging.Formatter(
-    fmt='%(asctime)s - %(levelname)s - %(name)s | %(message)s',
+    fmt='%(asctime)s|%(levelname)s|%(name)s| %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
 )
 formatter.converter = time.gmtime  # use utc in log
@@ -108,10 +108,15 @@ logging.captureWarnings(True)
 
 
 def main(args):
+    if 'FACT_PASSWORD' in os.environ:
+        passwd = os.environ['FACT_PASSWORD']
+    else:
+        passwd = False
+
     log = logging.getLogger('starry_night')
     log.info('starry_night started')
     log.info('version: {}'.format(__version__))
-    
+
     if args['--debug']:
         log.info('DEBUG MODE - NOT FOR REGULAR USE')
         log.setLevel(logging.DEBUG)
@@ -119,7 +124,7 @@ def main(args):
         #print(args)
 
     configList = list()
-    
+
     conf_succ = 0
     # try to open config file of package
     path = pkg_resources.resource_filename('starry_night','data/')
@@ -159,8 +164,14 @@ def main(args):
 
     # prepare everything for sql connection
     if args['--sql']:
-        log.info('Storing results in SQL Database.\nConnection: {}\nPlease enter password'.format(config['SQL']['connection']))
-        config['SQL']['connection'] = config['SQL']['connection'].format(getpass())
+        log.info('Storing results in SQL Database.\nConnection: {}'.format(config['SQL']['connection']))
+
+        if passwd:
+            config['SQL']['connection'] = config['SQL']['connection'].format(passwd)
+        else:
+            log.info('Please enter password'.format(config['SQL']['connection']))
+            config['SQL']['connection'] = config['SQL']['connection'].format(getpass())
+
         for c in configList:
             c['SQL']['connection'] = config['SQL']['connection']
         try:
@@ -173,8 +184,11 @@ def main(args):
             log.error(e)
             sys.exit(1)
     if not args['<image>']:
-        log.info('Please enter password to get acces to Magic lidar. Leave blank to skip.')
-        data['lidarpwd'] = getpass()
+        if passwd:
+            data['lidarpwd'] = passwd
+        else:
+            log.info('Please enter password to get acces to Magic lidar. Leave blank to skip.')
+            data['lidarpwd'] = getpass()
     else:
         data['lidarpwd'] = None
 
@@ -209,7 +223,7 @@ def main(args):
                 log.error('Download of image failed. Try again in 30 s. {}'.format(e))
                 time.sleep(30)
                 continue
-                
+
             results.append(skycam.process_image(img, data, configList, args))
             if not args['--daemon']:
                 log.info('Do not download any more images because option --daemon is not set')
@@ -265,7 +279,7 @@ def main(args):
             results.pop(i)
         else:
             i+=1
-    
+
     imgCount = len(results)
     log.info('{} images were processed successfully.'.format(imgCount))
 
@@ -322,7 +336,7 @@ def main(args):
         grouped = df.groupby('HIP')
         # fit transmission for each star
         for group in grouped:
-            # dont use stars for fit that do not span a wide distance 
+            # dont use stars for fit that do not span a wide distance
             if group[1].altitude.max() - group[1].altitude.min() < np.deg2rad(float(config['image']['openingangle']))/2:
                 continue
             x = group[1].sort_values('altitude').altitude.values
@@ -400,7 +414,7 @@ def main(args):
             if abs(to_plot.vmag.max() - vmag) >= 0.25:
                 # dont plot, if magnitude differs too much
                 continue
-           
+
             #maxVal = to_plot.query('altitude > {}'.format(np.percentile(to_plot.altitude, 90))).response_orig.mean()
             #popt, pcov = curve_fit(skycam.transmission2, to_plot.altitude.values, to_plot.response_orig.values, p0=[0,0.57])
             popt, pcov = curve_fit(skycam.transmission3, to_plot.altitude.values, to_plot.response_orig.values, p0=[0,0.57])
@@ -515,7 +529,7 @@ def main(args):
         if args['-v']:
             plt.show()
         plt.close('all')
-    
+
     if args['--cloudtrack']:
         embed()
         sys.exit(1)
@@ -525,7 +539,7 @@ def main(args):
 
 
         print('Tracking done')
-    
+
 
     '''
     def logf(x, m, b):
