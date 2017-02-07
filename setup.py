@@ -22,6 +22,7 @@ setup(
         'setuptools',
         'scikit-image',
         'astropy',
+        'configparser',
     ],
     test_suite='nose.collector',
     tests_require=['nose'],
