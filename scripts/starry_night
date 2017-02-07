@@ -90,7 +90,7 @@ logfile_handler = logging.FileHandler(filename=logfile_path, mode='w')
 logfile_handler.setLevel(logging.ERROR)
 logstream_handler = logging.StreamHandler()
 formatter = logging.Formatter(
-    fmt='%(asctime)s|%(levelname)s|%(name)s| %(message)s',
+    fmt='%(asctime)s|%(levelname)s|%(name)s|%(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
 )
 formatter.converter = time.gmtime  # use utc in log
