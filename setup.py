@@ -23,6 +23,7 @@ setup(
         'scikit-image',
         'astropy',
         'pytables',
+        'configparser',
     ],
     test_suite='nose.collector',
     tests_require=['nose'],
