@@ -3,6 +3,7 @@
 '''
 Usage:
     starry_night -c <confFile> [<image>...] [options]
+    starry_night -c <confFile> --daemon [options]
     starry_night -c <confFile> --daemon
 
 Options:
