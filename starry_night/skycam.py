@@ -86,7 +86,7 @@ def transmission3(x, a, c):
     '''
     Return atmospheric transmission of spheric model with elevated observer
     x: zenith angle in rad
-    a: amplitude. So: transmission(0,a,b) = a 
+    a: amplitude. So: transmission(0,a,b) = a
     '''
     yObs=2.2
     yAtm=9.5
@@ -201,7 +201,7 @@ def downloadImg(url, timeout=None):
         timestamp = get_last_modified(url, timeout=timeout)
         if not timestamp:
             return dict()
-        
+
     return {
         'img' : img,
         'timestamp' : timestamp,
@@ -227,7 +227,7 @@ def getBlobsize(img, thresh, limit=0):
     # if all pixels are above threshold then return max blob size
     if thresh <= np.min(img):
         return np.minimum(limit, img.shape[0]*img.shape[1])
-    
+
     # work on local copy
     tempImg = img.copy()
     tempImg[~np.isfinite(tempImg)] = 0
@@ -251,7 +251,7 @@ def getBlobsize(img, thresh, limit=0):
         if count >= limit:
             return limit
     return count
-    
+
 
 def theta2r(theta, radius, how='lin'):
     '''
@@ -332,7 +332,7 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
 
     if closest.empty:
         return dict()
-        
+
     # test if equatorial is NaN or undefinded
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
@@ -423,7 +423,7 @@ def celObjects_dict(config):
     Returns: dictionary with celestial objects
     '''
     log = logging.getLogger(__name__)
-    
+
     log.debug('Loading stars')
     catalogue = resource_filename('starry_night', 'data/catalogue_10vmag_0.8degFilter.csv')
     try:
@@ -493,7 +493,7 @@ def celObjects_dict(config):
     points_of_interest['altitude'] = np.NaN
     points_of_interest['azimuth'] = np.NaN
     points_of_interest['radius'] = float(config['analysis']['poi_radius'])
-    points_of_interest['ra'] *= np.pi/180 
+    points_of_interest['ra'] *= np.pi/180
     points_of_interest['dec'] *= np.pi/180
 
     # add moon
@@ -577,7 +577,7 @@ def update_star_position(data, observer, conf, crop, args):
 
     # make a copy here, because we will need ALL stars later again
     # append lidar position from positioning file if any
-    # append Total_sky object 
+    # append Total_sky object
     # update all objects
     # remove objects that are not within the limits
     stars = data['stars'].copy()
@@ -655,7 +655,7 @@ def update_star_position(data, observer, conf, crop, args):
     # remove stars that are too close to planets because they are brighter and we will mistake them otherwise
     tolerance = int(conf['analysis']['pixelTolerance'])
     for i, pl in planets.iterrows():
-        stars.query('~(({} < x < {}) & ({} < y < {}))'.format(pl.x-tolerance, pl.x+tolerance, pl.y-tolerance, pl.y+tolerance), inplace=True) 
+        stars.query('~(({} < x < {}) & ({} < y < {}))'.format(pl.x-tolerance, pl.x+tolerance, pl.y-tolerance, pl.y+tolerance), inplace=True)
 
     return {'stars':stars, 'planets':planets, 'points_of_interest': points_of_interest, 'moon': moonData, 'sun': sunData, 'lidar': magicLidar_now}
 
@@ -670,7 +670,7 @@ def findLocalStd(img, x, y, radius):
     except TypeError:
         x = x.astype(int)
         y = y.astype(int)
-    
+
     # get interval border
     x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
     y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
@@ -698,7 +698,7 @@ def findLocalMean(img, x, y, radius):
     except TypeError:
         x = x.astype(int)
         y = y.astype(int)
-    
+
     # get interval border
     x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
     y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
@@ -726,7 +726,7 @@ def findLocalMaxValue(img, x, y, radius):
     except TypeError:
         x = x.astype(int)
         y = y.astype(int)
-    
+
     # get interval border
     x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
     y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
@@ -773,7 +773,7 @@ def findLocalMaxPos(img, x, y, radius):
 def getImageDict(filepath, config, crop=None, fmt=None):
     '''
     Open an image file and return its content as a numpy array.
-    
+
     input:
         filename: full or relativ path to image
         crop: Config section 'crop' defines circles with center and radius
@@ -852,7 +852,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
                 time = datetime.strptime(filename, config['properties']['timeformat'])
             else:
                 time = datetime.strptime(filename, fmt)
-        
+
         # hardcoded because filename of magic files changed in between
         except ValueError:
             try:
@@ -887,7 +887,7 @@ def get_crop_mask(img, crop):
     '''
     Return crop mask specified in 'crop'
     crop is dictionary with cropping information
-    returns a boolean array in size of img: False got cropped; True not cropped 
+    returns a boolean array in size of img: False got cropped; True not cropped
     '''
     nrows, ncols = img.shape
     row, col = np.ogrid[:nrows, :ncols]
@@ -920,7 +920,7 @@ def isInRange(position, stars, rng, unit='deg'):
     '''
     if rng < 0:
         raise ValueError
-    
+
     if unit == 'pixel':
         try:
             return ((position.x - stars.x)**2 + (position.y - stars.y)**2 <= rng**2)
@@ -950,9 +950,9 @@ def isInRange(position, stars, rng, unit='deg'):
 
 def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
     '''
-    Returns: percentage of stars within range of position that are visible 
+    Returns: percentage of stars within range of position that are visible
              and -1 if no stars are in range
-    
+
     Position is dictionary and can contain Ra,Dec and/or x,y
     Range is degree or pixel radius depending on whether unit is 'grad' or 'pixel'
     Lim > 0: is limit visibility that separates visible stars from not visible. [0.0 - 1.0].
@@ -1050,7 +1050,7 @@ def filter_catalogue(catalogue, rng):
     except KeyError:
         log.error('Key not found. Please check that your catalogue is labeled correctly')
         raise
-    
+
     popped = 0 #count popped stars
     i1 = 0 #index of star that will be checked
     while i1 < len(positionList)-1:
@@ -1115,7 +1115,7 @@ def process_image(images, data, configList, args):
     moon.compute(observer)
     if np.rad2deg(sun.alt) > -15:
         log.info('Sun too high: {}° above horizon. We start below -15°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
-        return 
+        return
 
     # put timestamp and hash sum into output dict
     output['timestamp'] = images['timestamp']
@@ -1123,7 +1123,7 @@ def process_image(images, data, configList, args):
         output['hash'] = sha1(images['img'].data).hexdigest()
     except BufferError:
         output['hash'] = sha1(np.ascontiguousarray(images['img']).data).hexdigest()
-        
+
 
     # create cropping mask for unneccessary image regions.
     crop_mask = get_crop_mask(images['img'], config['crop'])
@@ -1141,7 +1141,7 @@ def process_image(images, data, configList, args):
     output['brightness_mean'] = np.nanmean(images['img'])
     output['brightness_std'] = np.nanmean(images['img'])
     img = images['img']
-    
+
     # calculate response of stars with image kernel
     if args['--kernel']:
         #kernelSize = float(args['--kernel']),
@@ -1158,7 +1158,7 @@ def process_image(images, data, configList, args):
         if len(kernelSize) > 1:
             stars = stars_orig.copy()
         stars['kernel'] = k
-    
+
         # prepare LoG kernel
         x,y = np.meshgrid(range(int(np.floor(-3*k)), int(np.ceil(3*k+1))), range(int(np.floor(-3*k)), int(np.ceil(3*k+1))))
         LoG_kernel = LoG(x, y, k)
@@ -1199,12 +1199,12 @@ def process_image(images, data, configList, args):
         images['response'] = resp
 
 
-        # to correct abberation the max filter response withing tolerance distance around a star will be chosen as 'real' star position 
+        # to correct abberation the max filter response withing tolerance distance around a star will be chosen as 'real' star position
         # there should be no need for this to be bigger than the diameter of the bigger stars because this means that the transformation we use is quite bad
         # and a bright star next to the real star might be detected by error
         tolerance = int(config['analysis']['pixelTolerance'])
         log.debug('Calculate Filter response')
-        
+
         # calculate x and y position where response has its max value (search within 'tolerance' range)
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
@@ -1227,11 +1227,11 @@ def process_image(images, data, configList, args):
         # correct atmospherice absorbtion
         stars['response_orig'] = stars.response
         stars['response'] = stars.response / transmission3(stars.altitude, 1.0, float(config['calibration']['airmass_absorbtion']))
-        
+
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
             stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
-        ulim, llim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))), 
+        ulim, llim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))),
                 list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
 
         # offset of upper limit can be reduced if moonlight reduces exposure time
@@ -1257,7 +1257,7 @@ def process_image(images, data, configList, args):
                 1,
                 np.maximum(
                     0,
-                    (np.log10(stars['response']) - (stars['vmag']*llim[0] + llim[1])) / 
+                    (np.log10(stars['response']) - (stars['vmag']*llim[0] + llim[1])) /
                     ((stars['vmag']*ulim[0] + ulim[1]) - (stars['vmag']*float(llim[0]) + llim[1]))
                     )
                 )
@@ -1289,7 +1289,7 @@ def process_image(images, data, configList, args):
         log.warning('Can not process points_of_interest if multiple kernel sizes get used')
     output['global_star_perc'] = calc_star_percentage({'altitude': np.pi/2, 'azimuth':0}, stars, float(config['image']['openingangle']), unit='deg', lim=-1, weight=True)
     output['magic_lidar'] = celObjects['lidar']
-    
+
     ##################################
     # processing done. Now plot everything
     ##################################
@@ -1372,9 +1372,9 @@ def process_image(images, data, configList, args):
         cbar.ax.set_ylabel('Visibility')
 
         if args['-s']:
-            plt.savefig('cam_image_{}.png'.format(images['timestamp'].isoformat()))
+            plt.savefig('cam_image_{}_{}.png'.format(config['properties']['name'], images['timestamp'].isoformat()))
         if args['--daemon']:
-            plt.savefig('cam_image_{}.png'.format(config['properties']['name']),dpi=300)
+            plt.savefig('cam_image_{}_{}.png'.format(config['properties']['name'], images['timestamp'].isoformat()))
         if args['-v']:
             plt.show()
         plt.close('all')
@@ -1418,14 +1418,15 @@ def process_image(images, data, configList, args):
             stars.plot.scatter(x='x',y='y', ax=ax_in, c=color, vmin=0, vmax=1, grid=True)
             ax_in.get_xaxis().set_visible(False)
             ax_in.get_yaxis().set_visible(False)
-            
+
             leg = ax.legend(loc='best')
             leg.legendHandles[2].set_color('yellow')
             plt.tight_layout()
             if args['-s']:
-                plt.savefig('response_{}_{}.png'.format(args['--function'], images['timestamp'].isoformat()))
+                plt.savefig('response_{}_{}.png'.format(config['properties']['name'], images['timestamp'].isoformat()))
             if args['--daemon']:
-                plt.savefig('response_{}.png'.format(config['properties']['name']),dpi=200)
+                plt.savefig('response_{}_{}.png'.format(config['properties']['name'], images['timestamp'].isoformat()))
+                #plt.savefig('response_{}.png'.format(config['properties']['name']),dpi=200)
             if args['-v']:
                 plt.show()
             plt.close('all')
@@ -1536,7 +1537,7 @@ def process_image(images, data, configList, args):
             fig.text(0.53, 0.02, '$x$ / px', ha='center')
             plt.tight_layout(h_pad=-0.1)
             if args['-s']:
-                plt.savefig('cloudMap_{}.png'.format(images['timestamp'].isoformat()))
+                plt.savefig('cloudMap_{}_{}.png'.format(config['properties']['name'], images['timestamp'].isoformat()))
             if args['-v']:
                 plt.show()
             plt.close('all')
@@ -1544,7 +1545,8 @@ def process_image(images, data, configList, args):
             ax = plt.subplot(111)
             ax.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
             ax.grid()
-            plt.savefig('cloudMap_{}.png'.format(config['properties']['name']),dpi=400)
+            plt.savefig('cloudMap_{}_{}.png'.format(config['properties']['name'], images['timestamp'].isoformat()))
+            #plt.savefig('cloudMap_{}.png'.format(config['properties']['name']),dpi=400)
     try:
         output['global_coverage'] = np.nanmean(cloudmap)
     except NameError:
@@ -1578,7 +1580,7 @@ def process_image(images, data, configList, args):
         del output
         output = slimOutput
         del slimOutput
-                
+
     if args['--daemon']:
         del output
         output = None
