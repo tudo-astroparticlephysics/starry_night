@@ -1078,7 +1078,7 @@ def process_image(images, data, configList, args):
 
     Use this in the main loop!
     '''
-    font = {'size'   : 25}
+    font = {'size'   : 12}
     rc('font', **font)
 
     log = logging.getLogger(__name__)
@@ -1355,7 +1355,7 @@ def process_image(images, data, configList, args):
 
     if args['--cam'] or args['--daemon']:
         output['img'] = img
-        fig = plt.figure(figsize=(16,9))
+        fig = plt.figure(figsize=(8,6) )
         ax = fig.add_subplot(111)
         vmin = np.nanpercentile(img, 5)
         vmax = np.nanpercentile(img, 90.)
@@ -1365,8 +1365,8 @@ def process_image(images, data, configList, args):
         ax.text(0.98, 0.02, str(output['timestamp']),
             verticalalignment='bottom', horizontalalignment='right',
             transform=ax.transAxes,
-            backgroundcolor='black',
-            color='white', fontsize=15,
+            backgroundcolor='white',
+            color='black', fontsize=12,
         )
         cbar = fig.colorbar(cax)
         cbar.ax.set_ylabel('Visibility')
