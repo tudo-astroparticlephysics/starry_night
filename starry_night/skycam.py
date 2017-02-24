@@ -1374,18 +1374,20 @@ def process_image(images, data, configList, args):
         plt.legend(loc=8, ncol=3, fontsize=8, bbox_to_anchor=(0.5, -0.01))
         cbar = fig.colorbar(cax)
         cbar.ax.set_ylabel('Visibility')
+        plt.axis('off')
+        plt.tick_params(axis='both', left='off', top='off', right='off', bottom='off', labelleft='off', labeltop='off', labelright='off', labelbottom='off')
 
         if args['-s']:
-            plt.savefig('cam_image_{}.png'.format(images['timestamp'].isoformat()))
+            plt.savefig('cam_image_{}.jpg'.format(images['timestamp'].isoformat()))
         if args['--daemon']:
-            plt.savefig('cam_image_{}.png'.format(config['properties']['name']),dpi=300)
+            plt.savefig('cam_image_{}.jpg'.format(config['properties']['name']),dpi=300)
         if args['-v']:
             plt.show()
         plt.close('all')
 
     if args['--single'] or args['--daemon']:
         if args['--response'] or args['--daemon']:
-            fig = plt.figure(figsize=(16,9))
+            fig = plt.figure(figsize=(4,3))
             ax = plt.subplot(111)
             ax.semilogy()
 
