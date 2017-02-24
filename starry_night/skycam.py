@@ -1312,7 +1312,7 @@ def process_image(images, data, configList, args):
         ax.grid()
         ax.legend(handles=[lEntry])
         if args['-s']:
-            plt.savefig('kernel_curve_{}.png'.format(config['properties']['name']))
+            plt.savefig('kernel_curve_{}.jpg'.format(config['properties']['name']))
         if args['-v']:
             plt.show()
         plt.close('all')
@@ -1346,7 +1346,7 @@ def process_image(images, data, configList, args):
         ax2.grid(b=True, which='minor')
         plt.tight_layout()
         if args['-s']:
-            plt.savefig('chose_sigma_{}.png'.format(config['properties']['name']))
+            plt.savefig('chose_sigma_{}.jpg'.format(config['properties']['name']))
         if args['-v']:
             plt.show()
         plt.close('all')
@@ -1424,14 +1424,14 @@ def process_image(images, data, configList, args):
             stars.plot.scatter(x='x',y='y', ax=ax_in, c=color, vmin=0, vmax=1, grid=True)
             ax_in.get_xaxis().set_visible(False)
             ax_in.get_yaxis().set_visible(False)
-            
+
             leg = ax.legend(loc='best')
             leg.legendHandles[2].set_color('yellow')
             plt.tight_layout()
             if args['-s']:
-                plt.savefig('response_{}_{}.png'.format(args['--function'], images['timestamp'].isoformat()))
+                plt.savefig('response_{}_{}.jpg'.format(args['--function'], images['timestamp'].isoformat()))
             if args['--daemon']:
-                plt.savefig('response_{}.png'.format(config['properties']['name']),dpi=200)
+                plt.savefig('response_{}.jpg'.format(config['properties']['name']),dpi=200)
             if args['-v']:
                 plt.show()
             plt.close('all')
@@ -1542,7 +1542,7 @@ def process_image(images, data, configList, args):
             fig.text(0.53, 0.02, '$x$ / px', ha='center')
             plt.tight_layout(h_pad=-0.1)
             if args['-s']:
-                plt.savefig('cloudMap_{}.png'.format(images['timestamp'].isoformat()))
+                plt.savefig('cloudMap_{}.jpg'.format(images['timestamp'].isoformat()))
             if args['-v']:
                 plt.show()
             plt.close('all')
@@ -1550,7 +1550,7 @@ def process_image(images, data, configList, args):
             ax = plt.subplot(111)
             ax.imshow(cloud_map, cmap='gray_r', vmin=0, vmax=1)
             ax.grid()
-            plt.savefig('cloudMap_{}.png'.format(config['properties']['name']),dpi=400)
+            plt.savefig('cloudMap_{}.jpg'.format(config['properties']['name']),dpi=400)
     try:
         output['global_coverage'] = np.nanmean(cloudmap)
     except NameError:
