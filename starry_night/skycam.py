@@ -1360,14 +1360,18 @@ def process_image(images, data, configList, args):
         vmin = np.nanpercentile(img, 5)
         vmax = np.nanpercentile(img, 90.)
         ax.imshow(img, vmin=vmin,vmax=vmax, cmap='gray')
-        cax = ax.scatter(stars.x.values, stars.y.values, c=stars.visible.values, cmap = plt.cm.RdYlGn, s=30, vmin=0, vmax=1)
-        celObjects['points_of_interest'].plot.scatter(x='x', y='y', ax=plt.gca(), s=80, color='white', marker='^', label='Sources')
-        ax.text(0.98, 0.02, str(output['timestamp']),
-            verticalalignment='bottom', horizontalalignment='right',
+        cax = ax.scatter(stars.x.values, stars.y.values, c=stars.visible.values, cmap = plt.cm.RdYlGn, s=10, vmin=0, vmax=1)
+
+        for row in celObjects['points_of_interest'].iterrows():
+            ax.plot(row[1].x, row[1].y, marker='^', label=row[1]["name"], linestyle='None')
+            
+        ax.text(0.04, 0.985, str(output['timestamp']),
+            verticalalignment='bottom', horizontalalignment='left',
             transform=ax.transAxes,
             backgroundcolor='white',
             color='black', fontsize=12,
         )
+        plt.legend(loc=8, ncol=3, fontsize=8, bbox_to_anchor=(0.5, -0.01))
         cbar = fig.colorbar(cax)
         cbar.ax.set_ylabel('Visibility')
 
