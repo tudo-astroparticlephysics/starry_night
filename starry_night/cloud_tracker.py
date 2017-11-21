@@ -142,7 +142,6 @@ class CloudTracker:
                 ax1.legend(loc='upper right')
             ax2 = fig.add_subplot(122)
             if self.pred_map[cnt] != None:
-                pred = self.pred_map[cnt]
                 ax2.imshow(self.pred_map[cnt], vmin=0, vmax=1)
             else:
                 ax2.imshow(np.ones(self.maps[0].shape), vmin=0, vmax=1)
@@ -165,10 +164,9 @@ class CloudTracker:
         with values from previous map.
         '''
         shifted_map = self.__shift_and_crop(prev_map, wind_x, wind_y)
-        wind_speed = np.sqrt(wind_x**2+wind_y**2)
-        wind_steps = wind_speed//int(self.config['image']['radius'])
-        #dont fill empty space with previous cloud map because it looks bad
-        #shifted_map[np.isnan(shifted_map)] = prev_map[np.isnan(shifted_map)]
+        wind_speed = np.sqrt(wind_x**2 + wind_y**2)
+        # dont fill empty space with previous cloud map because it looks bad
+        # shifted_map[np.isnan(shifted_map)] = prev_map[np.isnan(shifted_map)]
         self.pred_map.append(shifted_map)
         self.wind_speed.append(wind_speed)
 
@@ -200,8 +198,3 @@ class CloudTracker:
             self.wind_speed.pop(0)
         if (len(self.pred_map) > self.max_maps):
             self.pred_map.pop(0)
-
-
-
-
-
