@@ -14,6 +14,9 @@ from astropy.time import Time
 from astropy.convolution import convolve, convolve_fft
 from astropy import units as u
 from astropy.coordinates import SkyCoord, EarthLocation
+from astropy.coordinates.angle_utilities import angular_separation
+import astropy.units as u
+
 from scipy.io import matlab
 from scipy.ndimage.measurements import label
 from scipy.optimize import curve_fit
@@ -33,6 +36,7 @@ import logging
 
 from re import split, findall
 from hashlib import sha1
+
 from sqlalchemy.exc import OperationalError, InternalError
 import requests.exceptions as rex
 
@@ -40,13 +44,17 @@ import requests.exceptions as rex
 def degDist(ra1, ra2, dec1, dec2):
     '''
     Returns great circle distance between two points on a sphere in degree.
-    Using haversine formula.
 
     Input: ra and dec in rad
     Output: Angle in degree
     '''
-    return np.rad2deg(2*np.arcsin(np.sqrt(np.sin((ra1-ra2)/2)**2 +
-        np.cos(ra1)*np.cos(ra2)*np.sin((dec1-dec2)/2)**2)))
+    return angular_separation(
+        ra1 * u.rad,
+        dec1 * u.rad,
+        ra2 * u.rad,
+        dec2 * u.rad
+    ).to(u.deg).value
+
 
 def LoG(x,y,sigma):
     '''
