@@ -56,7 +56,7 @@ def degDist(ra1, ra2, dec1, dec2):
     ).to(u.deg).value
 
 
-def LoG(x,y,sigma):
+def LoG(x, y, sigma):
     '''
     Return discretized Laplacian of Gaussian kernel.
     Mean = 0 normalized and scale invarian by multiplying with sigma**2
@@ -65,26 +65,31 @@ def LoG(x,y,sigma):
     kernel -= np.mean(kernel)
     return kernel * sigma**2
 
-def lin(x,m,b):
-    'Just a linear function'
-    return m*x+b
 
-def expo(x,m,b):
-    return np.exp(m*x+b)
+def lin(x, m, b):
+    'Just a linear function'
+    return m * x + b
+
+
+def expo(x, m, b):
+    return np.exp(m * x + b)
+
 
 def transmission(x, a, c):
     '''
     Return atmospheric transmission of planar model
     '''
-    x = np.pi/2 -x
-    return a*np.exp(-c * (1/np.cos(x) - 1))
+    x = np.pi / 2 - x
+    return a * np.exp(-c * (1 / np.cos(x) - 1))
+
 
 def transmission2(x, a, c):
     '''
     return atmospheric transmission of planar model with correction (Young - 1974)
     '''
-    x = np.pi/2 -x
-    return a * np.exp(-c * (1/np.cos(x)*(1-0.0012*(1/np.cos(x)**2 - 1)) - 1))
+    x = np.pi / 2 - x
+    return a * np.exp(-c * (1 / np.cos(x) * (1 - 0.0012 * (1 / np.cos(x)**2 - 1)) - 1))
+
 
 def transmission3(x, a, c):
     '''
@@ -92,22 +97,23 @@ def transmission3(x, a, c):
     x: zenith angle in rad
     a: amplitude. So: transmission(0,a,b) = a
     '''
-    yObs=2.2
-    yAtm=9.5
-    rEarth=6371.0
+    yObs = 2.2
+    yAtm = 9.5
+    rEarth = 6371.0
 
-    x = (np.pi/2 -x)
+    x = (np.pi / 2 - x)
     r = rEarth / yAtm
     y = yObs / yAtm
 
-    airMass = np.sqrt( ( r + y )**2 * np.cos(x)**2 + 2.*r*(1.-y) - y**2 + 1.0 ) - (r+y)*np.cos(x)
-    airM_0 = np.sqrt( ( r + y )**2 + 2.*r*(1.-y) - y**2 + 1.0 ) - (r+y)
-    #This model does not return 1.0 for zenith angle so we subtract airM_0 instead in the end instead of 1
-    return a* np.exp(-c * (airMass - airM_0 ))
+    airMass = np.sqrt((r + y)**2 * np.cos(x)**2 + 2 * r * (1 - y) - y**2 + 1.0) - (r + y) * np.cos(x)
+    airM_0 = np.sqrt((r + y)**2 + 2 * r * (1 - y) - y**2 + 1.0) - (r + y)
+    # This model does not return 1.0 for zenith angle so we subtract airM_0 instead in the end instead of 1
+    return a * np.exp(-c * (airMass - airM_0 ))
 
 
 class TooEarlyError(Exception):
     pass
+
 
 def get_last_modified(url, timeout):
     try:
@@ -122,6 +128,7 @@ def get_last_modified(url, timeout):
         date = None
     return date
 
+
 def getMagicLidar(passwd):
     '''
     Return dict with data of the Magic lidar on LaPalma.
@@ -129,9 +136,10 @@ def getMagicLidar(passwd):
     '''
     log = logging.getLogger(__name__)
     try:
-        response = requests.get('http://www.magic.iac.es/site/weather/protected/lidar_data.txt',
-                auth=requests.auth.HTTPBasicAuth('FACT', passwd)
-            )
+        response = requests.get(
+            'http://www.magic.iac.es/site/weather/protected/lidar_data.txt',
+            auth=requests.auth.HTTPBasicAuth('FACT', passwd)
+        )
     except rex.ConnectionError as e:
         log.error('Connecting to lidar failed {}'.format(e))
         return
@@ -141,13 +149,22 @@ def getMagicLidar(passwd):
         log.error('Wrong lidar password')
         return
     values = list(map(float, findall("\d+\.\d+|\d+", dataString)))
-    timestamp = datetime(*list(map(int,values[-3:])), *list(map(int,values[-6:-3])))
+    timestamp = datetime(*list(map(int, values[-3:])), *list(map(int, values[-6:-3])))
 
     # abort if last lidar update was more than 15min ago
     if datetime.utcnow() - timestamp > timedelta(minutes=15):
         return
     else:
-        return {'timestamp': timestamp, 'altitude': (90-values[0])/180*np.pi, 'azimuth': values[1]/180*np.pi, 'T3':values[3], 'T6':values[5], 'T9':values[7], 'T12':values[9]}
+        return {
+            'timestamp': timestamp,
+            'altitude': (90 - values[0]) / 180 * np.pi,
+            'azimuth': values[1] / 180 * np.pi,
+            'T3': values[3],
+            'T6': values[5],
+            'T9': values[7],
+            'T12': values[9],
+        }
+
 
 def downloadImg(url, timeout=None):
     '''
@@ -160,7 +177,7 @@ def downloadImg(url, timeout=None):
     '''
     log = logging.getLogger(__name__)
     if not hasattr(downloadImg, 'lastMod'):
-        downloadImg.lastMod = datetime(1,1,1)
+        downloadImg.lastMod = datetime(1, 1, 1)
         downloadImg.hash = ''
     logging.getLogger('requests').setLevel(logging.WARNING)
 
@@ -196,10 +213,8 @@ def downloadImg(url, timeout=None):
                 pass
     elif url.split('.')[-1] == 'FIT':
         hdulist = fits.open(BytesIO(ret.content), ignore_missing_end=True)
-        img = hdulist[0].data+2**16/2
-        timestamp = datetime.strptime(
-                        hdulist[0].header['UTC'],
-                        '%Y/%m/%d %H:%M:%S')
+        img = hdulist[0].data + 2**15
+        timestamp = datetime.strptime(hdulist[0].header['UTC'], '%Y/%m/%d %H:%M:%S')
     else:
         img = rgb2gray(imread(url, ))
         timestamp = get_last_modified(url, timeout=timeout)
@@ -207,9 +222,9 @@ def downloadImg(url, timeout=None):
             return dict()
 
     return {
-        'img' : img,
-        'timestamp' : timestamp,
-        }
+        'img': img,
+        'timestamp': timestamp,
+    }
 
 
 def getBlobsize(img, thresh, limit=0):
@@ -221,12 +236,12 @@ def getBlobsize(img, thresh, limit=0):
     '''
     if thresh <= 0:
         raise ValueError('Thresh > 0 required')
-    if img.shape[0]%2 == 0 or img.shape[1]%2==0:
+    if img.shape[0] % 2 == 0 or img.shape[1] % 2 == 0:
         raise IndexError('Only odd sized arrays are supported. Array shape:{}'.format(img.shape))
     if limit == 0:
-        limit = img.shape[0]*img.shape[1]
+        limit = img.shape[0] * img.shape[1]
 
-    center = (img.shape[0]//2, img.shape[1]//2)
+    center = (img.shape[0] // 2, img.shape[1] // 2)
 
     # if all pixels are above threshold then return max blob size
     if thresh <= np.min(img):
@@ -242,16 +257,16 @@ def getBlobsize(img, thresh, limit=0):
     # fill list with pixels and count them
     nList.append(center)
     while len(nList) > 0:
-        x,y = nList.pop(0)
+        x, y = nList.pop(0)
 
-        for i in (-1,0,1):
-            for j in (-1,0,1):
-                if x+i<0 or x+i>=img.shape[0] or y+j<0 or y+j>=img.shape[1]:
+        for i in (-1, 0, 1):
+            for j in (-1, 0, 1):
+                if x + i < 0 or x + i >= img.shape[0] or y + j < 0 or y + j >= img.shape[1]:
                     pass
-                elif tempImg[x+i,y+j] >= thresh:
+                elif tempImg[x + i, y + j] >= thresh:
                     count += 1
-                    tempImg[x+i,y+j] = 0
-                    nList.append((x+i,y+j))
+                    tempImg[x + i, y + j] = 0
+                    nList.append((x + i, y + j))
         if count >= limit:
             return limit
     return count
@@ -265,9 +280,10 @@ def theta2r(theta, radius, how='lin'):
     assumes linear angle projection function or equisolid angle projection function (Sigma 4.5mm f3.5)
     '''
     if how == 'lin':
-        return radius / (np.pi/2) * theta
+        return radius / (np.pi / 2) * theta
     else:
-        return 2/np.sqrt(2) * radius * np.sin(theta/2)
+        return 2 / np.sqrt(2) * radius * np.sin(theta / 2)
+
 
 def r2theta(r, radius, how='lin', mask=False):
     '''
@@ -280,12 +296,12 @@ def r2theta(r, radius, how='lin', mask=False):
              -mask with valid values
     '''
     if how == 'lin':
-        return r / radius * (np.pi/2)
+        return r / radius * (np.pi / 2)
     else:
         if mask:
-            return np.arcsin(r / (2/np.sqrt(2)) / radius) * 2, r/(2/np.sqrt(2))/radius < 1
+            return np.arcsin(r / (2 / np.sqrt(2)) / radius) * 2, r / (2 / np.sqrt(2)) / radius < 1
         else:
-            return np.arcsin(r / (2/np.sqrt(2)) / radius) * 2
+            return np.arcsin(r / (2 / np.sqrt(2)) / radius) * 2
 
 
 def horizontal2image(az, alt, cam):
@@ -309,18 +325,18 @@ def horizontal2image(az, alt, cam):
         y cordinate in pixels for the given az, alt
     '''
 
-    try:
-        x = np.float(cam['zenith_x']) + theta2r(np.pi/2 - alt,
-                np.float(cam['radius']),
-                how=cam['angleprojection']
-                ) * np.cos(az+np.deg2rad(np.float(cam['azimuthoffset'])))
-        y = np.float(cam['zenith_y']) - theta2r(np.pi/2 - alt,
-                np.float(cam['radius']),
-                how=cam['angleprojection']
-                ) * np.sin(az+np.deg2rad(np.float(cam['azimuthoffset'])))
-    except:
-        raise
+    radius = theta2r(
+        np.pi / 2 - alt,
+        np.float(cam['radius']),
+        how=cam['angleprojection']
+    )
+    phi = az + np.deg2rad(np.float(cam['azimuthoffset']))
+
+    x = np.float(cam['zenith_x']) + radius * np.cos(phi)
+    y = np.float(cam['zenith_y']) - radius * np.sin(phi)
+
     return x, y
+
 
 def find_matching_pos(img_timestamp, time_pos_list, conf):
     '''
@@ -332,7 +348,7 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
     Converts coordinates in horizontal coords.
     '''
     subset = time_pos_list.query('-1/24/60 * 10 < MJD - {} < 1/24/60*1'.format(Time(img_timestamp).mjd)).sort_values('MJD')
-    closest = subset[subset.MJD==subset.MJD.min()]
+    closest = subset[subset.MJD == subset.MJD.min()]
 
     if closest.empty:
         return dict()
@@ -355,12 +371,12 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
                 log.error('Failed coord tranformation for find_matching_pos')
                 return dict()
         else:
-        # equatorial is definded
+            # equatorial is definded
             closest['azimuth'], closest['altitude'] = eq2ho(
                 closest.ra, closest.dec, conf['properties'], img_timestamp
             )
         logging.getLogger(__name__).debug('Found match')
-        return closest[['azimuth','altitude','ra','dec']]
+        return closest[['azimuth', 'altitude', 'ra', 'dec']]
 
 
 def obs_setup(properties):
@@ -372,15 +388,26 @@ def obs_setup(properties):
     obs.epoch = ephem.J2000
     return obs
 
+
 def eq2ho(ra, dec, prop, time):
-    loc = EarthLocation.from_geodetic(lat=float(prop['latitude'])*u.deg, lon=float(prop['longitude'])*u.deg, height=float(prop['elevation'])*u.m)
-    c = SkyCoord(ra=ra*u.radian, dec=dec*u.radian, frame='icrs', location=loc, obstime=time).transform_to('altaz').altaz
+    loc = EarthLocation.from_geodetic(
+        lat=float(prop['latitude'])*u.deg,
+        lon=float(prop['longitude'])*u.deg,
+        height=float(prop['elevation'])*u.m
+    )
+    c = SkyCoord(ra=ra * u.radian, dec=dec * u.radian, frame='icrs', location=loc, obstime=time).transform_to('altaz').altaz
     return c.az.rad, c.alt.rad
 
+
 def ho2eq(az, alt, prop, time):
-    loc = EarthLocation.from_geodetic(lat=float(prop['latitude'])*u.deg, lon=float(prop['longitude'])*u.deg, height=float(prop['elevation'])*u.m)
-    c = SkyCoord(az=az*u.radian, alt=alt*u.radian, location=loc, frame='altaz', obstime=time).transform_to('icrs')
+    loc = EarthLocation.from_geodetic(
+        lat=float(prop['latitude'])*u.deg,
+        lon=float(prop['longitude'])*u.deg,
+        height=float(prop['elevation'])*u.m
+    )
+    c = SkyCoord(az=az * u.radian, alt=alt * u.radian, location=loc, frame='altaz', obstime=time).transform_to('icrs')
     return c.ra.rad, c.dec.rad
+
 
 def equatorial2horizontal(ra, dec, observer):
     '''
@@ -412,10 +439,10 @@ def equatorial2horizontal(ra, dec, observer):
 
     h = observer.sidereal_time() - ra
     alt = np.arcsin(np.sin(obs_lat) * np.sin(dec) + np.cos(obs_lat) * np.cos(dec) * np.cos(h))
-    az = np.arctan2(np.sin(h), np.cos(h) * np.sin(obs_lat) - np.tan(dec)*np.cos(obs_lat))
+    az = np.arctan2(np.sin(h), np.cos(h) * np.sin(obs_lat) - np.tan(dec) * np.cos(obs_lat))
 
     # correction for camera orientation
-    az = np.mod(az+np.pi, 2*np.pi)
+    az = np.mod(az + np.pi, 2 * np.pi)
     return az, alt
 
 
@@ -512,12 +539,13 @@ def celObjects_dict(config):
         'azimuth' : np.NaN,
     }
 
-    return dict({'stars': stars,
+    return {
+        'stars': stars,
         'planets': planets,
-        'points_of_interest' : points_of_interest,
+        'points_of_interest': points_of_interest,
         'sun': sunData,
         'moon': moonData,
-        })
+    }
 
 
 def update_star_position(data, observer, conf, crop, args):
@@ -536,9 +564,9 @@ def update_star_position(data, observer, conf, crop, args):
     moon = ephem.Moon()
     moon.compute(observer)
     moonData = {
-        'moonPhase' : float(moon.moon_phase),
-        'altitude' : float(moon.alt),
-        'azimuth' : float(moon.az),
+        'moonPhase': float(moon.moon_phase),
+        'altitude': float(moon.alt),
+        'azimuth': float(moon.az),
     }
 
     # include sun data
@@ -546,8 +574,8 @@ def update_star_position(data, observer, conf, crop, args):
     sun = ephem.Sun()
     sun.compute(observer)
     sunData = {
-        'altitude' : float(sun.alt),
-        'azimuth' : float(sun.az),
+        'altitude': float(sun.alt),
+        'azimuth': float(sun.az),
     }
 
     # add the planets
@@ -610,15 +638,13 @@ def update_star_position(data, observer, conf, crop, args):
             magicLidar_now['name'] = 'Magic Lidar now'
             magicLidar_now['ID'] = -3
             magicLidar_now['radius'] = float(conf['analysis']['poi_radius'])
-            points_of_interest = points_of_interest.append(
-                    {
-                        'name': magicLidar_now['name'],
-                        'ID' : magicLidar_now['ID'],
-                        'radius' : magicLidar_now['radius'],
-                        'altitude' : magicLidar_now['altitude'],
-                        'azimuth' : magicLidar_now['azimuth'],
-                    },ignore_index=True
-            )
+            points_of_interest = points_of_interest.append({
+                'name': magicLidar_now['name'],
+                'ID': magicLidar_now['ID'],
+                'radius': magicLidar_now['radius'],
+                'altitude': magicLidar_now['altitude'],
+                'azimuth': magicLidar_now['azimuth'],
+            }, ignore_index=True)
 
     try:
         stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), data['vmaglimit']), inplace=True)
@@ -637,7 +663,6 @@ def update_star_position(data, observer, conf, crop, args):
     # remove stars and planets that are too close to moon
     stars.query('angleToMoon > {}'.format(np.deg2rad(float(conf['analysis']['minAngleToMoon']))), inplace=True)
     planets.query('angleToMoon > {}'.format(np.deg2rad(float(conf['analysis']['minAngleToMoon']))), inplace=True)
-
 
     # calculate x and y position
     log.debug('Calculate x and y')
@@ -676,12 +701,12 @@ def findLocalStd(img, x, y, radius):
         y = y.astype(int)
 
     # get interval border
-    x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
-    y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
-    radius = x_interval[1]-x_interval[0] , y_interval[1]-y_interval[0]
+    x_interval = np.max([x - radius, 0]), np.min([x + radius + 1, img.shape[1]])
+    y_interval = np.max([y - radius, 0]), np.min([y + radius + 1, img.shape[0]])
+    radius = x_interval[1] - x_interval[0], y_interval[1] - y_interval[0]
 
     # do subselection
-    subImg = img[y_interval[0]:y_interval[1] , x_interval[0]:x_interval[1]]
+    subImg = img[y_interval[0]:y_interval[1], x_interval[0]:x_interval[1]]
     try:
         return np.nanstd(subImg.flatten())
     except RuntimeWarning:
@@ -704,12 +729,12 @@ def findLocalMean(img, x, y, radius):
         y = y.astype(int)
 
     # get interval border
-    x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
-    y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
-    radius = x_interval[1]-x_interval[0] , y_interval[1]-y_interval[0]
+    x_interval = np.max([x - radius, 0]), np.min([x + radius + 1, img.shape[1]])
+    y_interval = np.max([y - radius, 0]), np.min([y + radius + 1, img.shape[0]])
+    radius = x_interval[1] - x_interval[0], y_interval[1] - y_interval[0]
 
     # do subselection
-    subImg = img[y_interval[0]:y_interval[1] , x_interval[0]:x_interval[1]]
+    subImg = img[y_interval[0]: y_interval[1], x_interval[0]:x_interval[1]]
     try:
         return np.nanmean(subImg.flatten())
     except RuntimeWarning:
@@ -732,12 +757,12 @@ def findLocalMaxValue(img, x, y, radius):
         y = y.astype(int)
 
     # get interval border
-    x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
-    y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
-    radius = x_interval[1]-x_interval[0] , y_interval[1]-y_interval[0]
+    x_interval = np.max([x - radius, 0]), np.min([x + radius + 1, img.shape[1]])
+    y_interval = np.max([y - radius, 0]), np.min([y + radius + 1, img.shape[0]])
+    radius = x_interval[1] - x_interval[0], y_interval[1] - y_interval[0]
 
     # do subselection
-    subImg = img[y_interval[0]:y_interval[1] , x_interval[0]:x_interval[1]]
+    subImg = img[y_interval[0]:y_interval[1], x_interval[0]:x_interval[1]]
     try:
         return np.nanmax(subImg.flatten())
     except RuntimeWarning:
@@ -760,18 +785,18 @@ def findLocalMaxPos(img, x, y, radius):
         x = x.astype(int)
         y = y.astype(int)
     # get interval border
-    x_interval = np.max([x-radius,0]) , np.min([x+radius+1, img.shape[1]])
-    y_interval = np.max([y-radius,0]) , np.min([y+radius+1, img.shape[0]])
-    radius = x_interval[1]-x_interval[0] , y_interval[1]-y_interval[0]
-    subImg = img[y_interval[0]:y_interval[1] , x_interval[0]:x_interval[1]]
+    x_interval = np.max([x - radius, 0]), np.min([x + radius + 1, img.shape[1]])
+    y_interval = np.max([y - radius, 0]), np.min([y + radius + 1, img.shape[0]])
+    radius = x_interval[1] - x_interval[0], y_interval[1] - y_interval[0]
+    subImg = img[y_interval[0]:y_interval[1], x_interval[0]:x_interval[1]]
     if np.max(subImg) != np.min(subImg):
         try:
             maxPos = np.nanargmax(subImg)
-            x = (maxPos%radius[0])+x_interval[0]
-            y = (maxPos//radius[0])+y_interval[0]
+            x = (maxPos % radius[0]) + x_interval[0]
+            y = (maxPos // radius[0]) + y_interval[0]
         except ValueError:
-            return pd.Series({'maxX':0, 'maxY':0})
-    return pd.Series({'maxX':int(x), 'maxY':int(y)})
+            return pd.Series({'maxX': 0, 'maxY': 0})
+    return pd.Series({'maxX': int(x), 'maxY': int(y)})
 
 
 def getImageDict(filepath, config, crop=None, fmt=None):
@@ -789,7 +814,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
 
     # get image type from filename
     filename = filepath.split('/')[-1].split('.')[0]
-    filetype= filepath.split('.')[-1]
+    filetype = filepath.split('.')[-1]
 
     if stat(filepath).st_size == 0:
         log.error('Image has size 0, aborting!: {}'.format(filepath))
@@ -802,9 +827,9 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             time = datetime.strptime(
                 data['UTC1'][0],
                 '%Y/%m/%d %H:%M:%S'
-                #config['properties']['timeformat']
+                # config['properties']['timeformat']
             )
-        except (KeyError,ValueError,OSError, FileNotFoundError) as e:
+        except (KeyError, ValueError, OSError, FileNotFoundError) as e:
             log.error('Failed to open image {}: {}'.format(filepath, e))
             return
 
@@ -824,7 +849,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
                     config['properties']['timeformat'],
                     )
                 '''
-                time=None
+                time = None
                 for t in [['UTC', '%Y/%m/%d %H:%M:%S'] , ['TIMEUTC', '%Y-%m-%d %H:%M:%S']]:
                     try:
                         time = datetime.strptime(
@@ -833,14 +858,14 @@ def getImageDict(filepath, config, crop=None, fmt=None):
                             )
                     except KeyError:
                         pass
-                if time == None:
+                if time is None:
                     raise KeyError('Timestamp not found in file {}'.format(filepath))
             else:
                 time = datetime.strptime(
                     filename,
                     config['properties']['timeformat'],
-                    )
-        except (ValueError, KeyError,OSError,FileNotFoundError) as e:
+                )
+        except (ValueError, KeyError, OSError, FileNotFoundError) as e:
             log.error('Error parsing timestamp of {}: {}'.format(filepath, e))
             return
 
@@ -849,7 +874,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
         try:
             img = imread(filepath, mode='L', as_grey=True)
         except (FileNotFoundError, OSError, ValueError) as e:
-            log.error('Error reading file \'{}\': {}'.format(filename+'.'+filetype, e))
+            log.error('Error reading file \'{}\': {}'.format(filename + '.' + filetype, e))
             return
         try:
             if fmt is None:
@@ -870,7 +895,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
                     log.error('Unable to parse image time from filename. Maybe format string is wrong.')
                     return
     time += timedelta(minutes=float(config['properties']['timeoffset']))
-    img = img.astype('float32') #needs to be float because we want to set some values NaN while cropping
+    img = img.astype('float32') # needs to be float because we want to set some values NaN while cropping
     return dict({'img': img, 'timestamp': time})
 
 
@@ -882,7 +907,7 @@ def update_crop_moon(crop_mask, moon, conf):
     row, col = np.ogrid[:nrows, :ncols]
     x = moon['x']
     y = moon['y']
-    r = theta2r(float(conf['analysis']['minAngleToMoon'])/180*np.pi, float(conf['image']['radius']), how=conf['image']['angleprojection'])
+    r = theta2r(float(conf['analysis']['minAngleToMoon']) / 180 * np.pi, float(conf['image']['radius']), how=conf['image']['angleprojection'])
     crop_mask = crop_mask | ((row - y)**2 + (col - x)**2 < r**2)
     return crop_mask
 
@@ -902,7 +927,7 @@ def get_crop_mask(img, crop):
         y = list(map(int, split('\\s*,\\s*', crop['crop_y'])))
         r = list(map(int, split('\\s*,\\s*', crop['crop_radius'])))
         inside = list(map(int, split('\\s*,\\s*', crop['crop_deleteinside'])))
-        for x,y,r,inside in zip(x,y,r,inside):
+        for x, y, r, inside in zip(x, y, r, inside):
             if inside == 0:
                 disk_mask = disk_mask | ((row - y)**2 + (col - x)**2 > r**2)
             else:
@@ -929,8 +954,10 @@ def isInRange(position, stars, rng, unit='deg'):
         try:
             return ((position.x - stars.x)**2 + (position.y - stars.y)**2 <= rng**2)
         except AttributeError as e:
+            log = logging.getLogger(__name__)
             log.error('Pixel value needed but object has no x/y attribute. {}'.format(e))
             sys.exit(1)
+
     elif unit == 'deg':
         try:
             ra1 = position['ra']
@@ -974,15 +1001,16 @@ def calc_star_percentage(position, stars, rng, lim=1, unit='deg', weight=False):
 
     if lim >= 0:
         if weight:
-            vis = np.sum(np.power(100**(1/5), -starsInRange.query('visible >= {}'.format(lim)).vmag.values))
-            notVis = np.sum(np.power(100**(1/5), -starsInRange.query('visible < {}'.format(lim)).vmag.values))
-            percentage = vis/(vis+notVis)
+            vis = np.sum(np.power(100**(1 / 5), -starsInRange.query('visible >= {}'.format(lim)).vmag.values))
+            notVis = np.sum(np.power(100**(1 / 5), -starsInRange.query('visible < {}'.format(lim)).vmag.values))
+            percentage = vis / (vis + notVis)
         else:
             percentage = len(starsInRange.query('visible >= {}'.format(lim)).index)/len(starsInRange.index)
     else:
         if weight:
-            percentage = np.sum(starsInRange.visible.values * np.power(100**(1/5),-starsInRange.vmag.values)) / \
-                np.sum(np.power(100**(1/5),-starsInRange.vmag.values))
+            percentage = np.sum(
+                starsInRange.visible.values * np.power(100**(1/5), -starsInRange.vmag.values)
+            ) / np.sum(np.power(100**(1/5),-starsInRange.vmag.values))
         else:
             percentage = np.mean(starsInRange.visible.values)
     return np.float64(percentage)
@@ -1003,8 +1031,8 @@ def calc_cloud_map(stars, rng, img_shape, weight=False):
     Division of both maps yields the desired cloudines map.
     '''
     if weight:
-        scattered_stars_visible,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=stars.visible.values * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
-        scattered_stars,_,_ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=np.ones(len(stars.index)) * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars_visible, _, _ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=stars.visible.values * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
+        scattered_stars, _, _ = np.histogram2d(x=stars.y.values, y=stars.x.values, weights=np.ones(len(stars.index)) * 2.5**-stars.vmag.values, bins=img_shape, range=[[0,img_shape[0]],[0,img_shape[1]]])
         density_visible = skimage.filters.gaussian(scattered_stars_visible, rng)
         density_all = skimage.filters.gaussian(scattered_stars, rng)
     else:
@@ -1018,8 +1046,7 @@ def calc_cloud_map(stars, rng, img_shape, weight=False):
         density_all[density_all < 10**-10]=1
         cloud_map = np.true_divide(density_visible, density_all)
         cloud_map[~np.isfinite(cloud_map)] = 0
-    return 1-cloud_map
-
+    return 1 - cloud_map
 
 
 def filter_catalogue(catalogue, rng):
@@ -1033,13 +1060,13 @@ def filter_catalogue(catalogue, rng):
     '''
     log = logging.getLogger(__name__)
     c = pd.read_csv(
-            catalogue,
-            sep=';',
-            comment='#',
-            header=0,
-            skipinitialspace=True,
-            na_values=[' ',''],
-        )
+        catalogue,
+        sep=';',
+        comment='#',
+        header=0,
+        skipinitialspace=True,
+        na_values=[' ',''],
+    )
     # keep stars with varflag < 2 or varflag == NaN
     # these stars have a vmag fluctuation < 0.06mag
     # also remove stars darker than mag=10
@@ -1055,8 +1082,8 @@ def filter_catalogue(catalogue, rng):
         log.error('Key not found. Please check that your catalogue is labeled correctly')
         raise
 
-    popped = 0 #count popped stars
-    i1 = 0 #index of star that will be checked
+    popped = 0  # count popped stars
+    i1 = 0  # index of star that will be checked
     while i1 < len(positionList)-1:
         if popped % 50 == 0:
             print('Left to process / size of filtered catalogue: {} / {}'.format(len(positionList)-i1, len(positionList)))
