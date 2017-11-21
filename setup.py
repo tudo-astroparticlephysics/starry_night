@@ -1,4 +1,4 @@
-from distutils.core import setup
+from setuptools import setup, find_packages
 
 setup(
     name='starry_night',
@@ -8,9 +8,7 @@ setup(
     author='Jan Adam',
     author_email='jan.adam@tu-dortmund.de',
     license='MIT',
-    packages=[
-        'starry_night',
-        ],
+    packages=find_packages(),
     install_requires=[
         'pandas',
         'scipy',
@@ -27,8 +25,11 @@ setup(
     ],
     test_suite='nose.collector',
     tests_require=['nose'],
-    scripts=['scripts/starry_night', 'scripts/configure'],
-
+    entry_points={
+        'console_scripts': [
+            'starry_night = starry_night.scripts.starry_night:main'
+        ]
+    },
     package_data={
         'starry_night': [
             'data/catalogue_10vmag_1.0degFilter.csv',

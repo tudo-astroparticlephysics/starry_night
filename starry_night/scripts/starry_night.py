@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding: utf-8
 '''
 Usage:
     starry_night -c <confFile> [<image>...] [options]
@@ -36,8 +35,6 @@ Options:
     --version       Show version.
     --debug         debug it [default: False]
 '''
-
-from __future__ import print_function
 from docopt import docopt
 import pkg_resources
 import logging
@@ -47,13 +44,12 @@ import numpy as np
 import pandas as pd
 import configparser
 import matplotlib.pyplot as plt
-import skimage.filters
 from matplotlib import rc, cm
-from datetime import datetime, timedelta
-from multiprocessing import Pool, cpu_count, set_start_method
+from datetime import datetime
+from multiprocessing import Pool, cpu_count
 from functools import partial
 from scipy.optimize import curve_fit
-from re import split, search
+from re import split
 from getpass import getpass
 from sqlalchemy import create_engine
 import os
@@ -62,9 +58,8 @@ from sqlalchemy.exc import OperationalError, InternalError
 import requests.exceptions as rex
 from tables import HDF5ExtError
 
-
-from starry_night import skycam, cloud_tracker
-from IPython import embed
+from .. import skycam, cloud_tracker
+from ..io import getImageDict
 
 #######################################################
 
@@ -73,7 +68,7 @@ rc('font', **font)
 
 
 def wrapper(const_celestialObjects, configList, args, img):
-    return skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
+    return skycam.process_image(getImageDict(img, configList[0]), const_celestialObjects, configList, args)
 
 
 
@@ -108,7 +103,12 @@ logging.basicConfig(
 logging.captureWarnings(True)
 
 
-def main(args):
+def main():
+    args = docopt(
+        doc=__doc__,
+        version=__version__,
+    )
+
     if 'FACT_PASSWORD' in os.environ:
         passwd = os.environ['FACT_PASSWORD']
     else:
@@ -122,7 +122,7 @@ def main(args):
         log.info('DEBUG MODE - NOT FOR REGULAR USE')
         log.setLevel(logging.DEBUG)
         log.debug('started starry_night in debug mode')
-        #print(args)
+        # print(args)
 
     configList = list()
 
@@ -532,8 +532,6 @@ def main(args):
         plt.close('all')
 
     if args['--cloudtrack']:
-        embed()
-        sys.exit(1)
         ct = cloud_tracker.CloudTracker(config)
         for cmap,timestamp in zip(cloudmap_list[0], cloudmap_list[1]):
             ct.update(cmap,timestamp)
@@ -572,19 +570,8 @@ def main(args):
     '''
 
 
-
-''' Main Loop '''
 if __name__ == '__main__':
-    args = docopt(
-        doc=__doc__,
-        version=__version__,
-        )
     try:
-        main(args)
+        main()
     except (KeyboardInterrupt, SystemExit) as e:
-        if len(e.args) == 0 or e.args[0] == 0:
-            logging.getLogger('starry_night').info('Exit')
-        else:
-            logging.getLogger('starry_night').info('Shutdown due to error!')
-    except:
-        raise
+        logging.getLogger('starry_night').info('Exit')

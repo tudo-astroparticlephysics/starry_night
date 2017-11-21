@@ -24,6 +24,7 @@ import logging
 from re import split
 
 from sqlalchemy.exc import OperationalError, InternalError
+from hashlib import sha1
 
 from .transmission import transmission_spheric
 from .skycoords import ho2eq, horizontal2image, equatorial2horizontal, eq2ho, obs_setup, degDist
