@@ -9,7 +9,6 @@ Options:
                     If none
     <image>         Image file(s) or folder(s)
     -p <posFile>    File that contains Positions and timestamps to analyse
-    -t Time         Force to use this time and do not parse image name
     -c Camera       Provide a camera config file or use one of these names: 'GTC', 'Magic' or 'CTA'
     -v              Visual output
     -s              Save output to files
@@ -233,27 +232,24 @@ def main():
         # use image(s) provided by the user and search for directories
         # remove entries that are no valid files
         log.info('Parsing file list. This might take a minute...')
+
         i = 0
         while len(args['<image>']) > i:
             if (i+1)%2000 == 0:
                 print('Prepared {} images of {}'.format(i+1, len(args['<image>'])))
+
             # expand content of directories
             if os.path.isdir(args['<image>'][i]):
                 _dir = args['<image>'].pop(i)
                 for root, dirs, files in os.walk(_dir):
                     for f in files:
-                        args['<image>'].append(os.path.join(root,f))
+                        args['<image>'].append(os.path.join(root, f))
             else:
                 # remove invalid files
                 if os.path.isfile(args['<image>'][i]):
                     i += 1
                 else:
                     args['<image>'].pop(i)
-
-        # no multiprocessing if only a single image was found
-        if len(args['<image>']) == 1:
-            if args['-t'] is not None:
-                images['timestamp'] = datetime(args['-t'])
         imgCount = len(args['<image>'])
 
         log.info('Processing {} images.'.format(imgCount))
