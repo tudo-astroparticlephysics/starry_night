@@ -71,7 +71,6 @@ def wrapper(const_celestialObjects, configList, args, img):
     return skycam.process_image(getImageDict(img, configList[0]), const_celestialObjects, configList, args)
 
 
-
 __version__ = pkg_resources.require('starry_night')[0].version
 directory = os.path.join(os.environ['HOME'], '.starry_night')
 if not os.path.exists(directory):
@@ -80,7 +79,7 @@ if not os.path.exists(directory):
 # create handler for file and console output
 logfile_path = os.path.join(
     directory, 'starry_night-{}.log'.format(datetime.utcnow().isoformat())
-    )
+)
 logfile_handler = logging.FileHandler(filename=logfile_path, mode='w')
 logfile_handler.setLevel(logging.ERROR)
 logstream_handler = logging.StreamHandler()
@@ -94,12 +93,12 @@ logstream_handler.setFormatter(formatter)
 
 # setup logging
 logging.basicConfig(
-        handlers = [
-            logfile_handler,
-            logstream_handler,
-            ],
-        level=logging.INFO,
-        )
+    handlers=[
+        logfile_handler,
+        logstream_handler,
+    ],
+    level=logging.INFO,
+)
 logging.captureWarnings(True)
 
 
