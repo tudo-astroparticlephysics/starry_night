@@ -15,7 +15,6 @@ from astropy.convolution import convolve, convolve_fft
 from astropy import units as u
 from astropy.coordinates import SkyCoord, EarthLocation
 from astropy.coordinates.angle_utilities import angular_separation
-import astropy.units as u
 
 from scipy.io import matlab
 from scipy.ndimage.measurements import label
@@ -39,6 +38,8 @@ from hashlib import sha1
 
 from sqlalchemy.exc import OperationalError, InternalError
 import requests.exceptions as rex
+
+from .transmission import transmission_spheric
 
 
 def degDist(ra1, ra2, dec1, dec2):
@@ -73,42 +74,6 @@ def lin(x, m, b):
 
 def expo(x, m, b):
     return np.exp(m * x + b)
-
-
-def transmission(x, a, c):
-    '''
-    Return atmospheric transmission of planar model
-    '''
-    x = np.pi / 2 - x
-    return a * np.exp(-c * (1 / np.cos(x) - 1))
-
-
-def transmission2(x, a, c):
-    '''
-    return atmospheric transmission of planar model with correction (Young - 1974)
-    '''
-    x = np.pi / 2 - x
-    return a * np.exp(-c * (1 / np.cos(x) * (1 - 0.0012 * (1 / np.cos(x)**2 - 1)) - 1))
-
-
-def transmission3(x, a, c):
-    '''
-    Return atmospheric transmission of spheric model with elevated observer
-    x: zenith angle in rad
-    a: amplitude. So: transmission(0,a,b) = a
-    '''
-    yObs = 2.2
-    yAtm = 9.5
-    rEarth = 6371.0
-
-    x = (np.pi / 2 - x)
-    r = rEarth / yAtm
-    y = yObs / yAtm
-
-    airMass = np.sqrt((r + y)**2 * np.cos(x)**2 + 2 * r * (1 - y) - y**2 + 1.0) - (r + y) * np.cos(x)
-    airM_0 = np.sqrt((r + y)**2 + 2 * r * (1 - y) - y**2 + 1.0) - (r + y)
-    # This model does not return 1.0 for zenith angle so we subtract airM_0 instead in the end instead of 1
-    return a * np.exp(-c * (airMass - airM_0 ))
 
 
 class TooEarlyError(Exception):
@@ -1257,7 +1222,7 @@ def process_image(images, data, configList, args):
 
         # correct atmospherice absorbtion
         stars['response_orig'] = stars.response
-        stars['response'] = stars.response / transmission3(stars.altitude, 1.0, float(config['calibration']['airmass_absorbtion']))
+        stars['response'] = stars.response / transmission_spheric(stars.altitude, 1.0, float(config['calibration']['airmass_absorbtion']))
 
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
