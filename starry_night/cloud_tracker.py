@@ -1,10 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
-from skimage.segmentation import active_contour
-from IPython import embed
-from starry_night.skycam import r2theta, theta2r
-from starry_night import skycam
+from .optics import theta2r
+from . import skycam
 
 class Cloud:
     def __init__(self, _id):
@@ -67,7 +65,7 @@ class CloudTracker:
         self.pred_map = [None, None, ]
         self.wind_direction = [None, ]
         self.wind_speed = [None, ]
-        
+
 
     def __transform_map(self, cloudmap):
         '''
@@ -157,10 +155,9 @@ class CloudTracker:
             ax2.set_ylabel(self.timestamps[cnt].isoformat().replace('T', ' '), rotation=90, labelpad=10)
             #plt.title('Current image - previous image shifted')
             fig.tight_layout(h_pad=-0.05)
-            plt.savefig('cloud_movement_{}.png'.format(self.timestamps[cnt].isoformat()),  bbox_inches='tight',) 
+            plt.savefig('cloud_movement_{}.png'.format(self.timestamps[cnt].isoformat()),  bbox_inches='tight',)
             #plt.show()
         plt.close('all')
-        embed()
 
     def predict_next_cloudmap(self, wind_x, wind_y, prev_map):
         '''

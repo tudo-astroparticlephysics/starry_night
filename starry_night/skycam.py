@@ -13,7 +13,6 @@ from astropy.io import fits
 from astropy.time import Time
 from astropy.convolution import convolve, convolve_fft
 from astropy import units as u
-from astropy.coordinates import SkyCoord, EarthLocation
 from astropy.coordinates.angle_utilities import angular_separation
 
 from scipy.io import matlab
@@ -40,6 +39,8 @@ from sqlalchemy.exc import OperationalError, InternalError
 import requests.exceptions as rex
 
 from .transmission import transmission_spheric
+from .skycoords import ho2eq, horizontal2image, equatorial2horizontal, eq2ho, obs_setup
+from .optics import theta2r
 
 
 def degDist(ra1, ra2, dec1, dec2):
@@ -237,72 +238,6 @@ def getBlobsize(img, thresh, limit=0):
     return count
 
 
-def theta2r(theta, radius, how='lin'):
-    '''
-    convert angle to the optical axis into pixel distance to the camera
-    center
-
-    assumes linear angle projection function or equisolid angle projection function (Sigma 4.5mm f3.5)
-    '''
-    if how == 'lin':
-        return radius / (np.pi / 2) * theta
-    else:
-        return 2 / np.sqrt(2) * radius * np.sin(theta / 2)
-
-
-def r2theta(r, radius, how='lin', mask=False):
-    '''
-    convert angle to the optical axis into pixel distance to the camera
-    center
-
-    assumes linear angle projection function or equisolid angle projection function (Sigma 4.5mm f3.5)
-
-    Returns: -converted coords,
-             -mask with valid values
-    '''
-    if how == 'lin':
-        return r / radius * (np.pi / 2)
-    else:
-        if mask:
-            return np.arcsin(r / (2 / np.sqrt(2)) / radius) * 2, r / (2 / np.sqrt(2)) / radius < 1
-        else:
-            return np.arcsin(r / (2 / np.sqrt(2)) / radius) * 2
-
-
-def horizontal2image(az, alt, cam):
-    '''
-    convert azimuth and altitude to pixel_x, pixel_y
-
-    Parameters
-    ----------
-    az : float or array-like
-        the azimuth angle in radians
-    alt : float or array-like
-        the altitude angle in radians
-    cam: dictionary
-        contains zenith position, radius
-
-    Returns
-    -------
-    pixel_x : number or array-like
-        x cordinate in pixels for the given az, alt
-    pixel_y : number or array-like
-        y cordinate in pixels for the given az, alt
-    '''
-
-    radius = theta2r(
-        np.pi / 2 - alt,
-        np.float(cam['radius']),
-        how=cam['angleprojection']
-    )
-    phi = az + np.deg2rad(np.float(cam['azimuthoffset']))
-
-    x = np.float(cam['zenith_x']) + radius * np.cos(phi)
-    y = np.float(cam['zenith_y']) - radius * np.sin(phi)
-
-    return x, y
-
-
 def find_matching_pos(img_timestamp, time_pos_list, conf):
     '''
     Return position of (e.g. LIDAR) in the moment the image was taken.
@@ -342,73 +277,6 @@ def find_matching_pos(img_timestamp, time_pos_list, conf):
             )
         logging.getLogger(__name__).debug('Found match')
         return closest[['azimuth', 'altitude', 'ra', 'dec']]
-
-
-def obs_setup(properties):
-    ''' creates an ephem.Observer for the MAGIC Site at given date '''
-    obs = ephem.Observer()
-    obs.lon = '-17:53:28'
-    obs.lat = '28:45:42'
-    obs.elevation = 2200
-    obs.epoch = ephem.J2000
-    return obs
-
-
-def eq2ho(ra, dec, prop, time):
-    loc = EarthLocation.from_geodetic(
-        lat=float(prop['latitude'])*u.deg,
-        lon=float(prop['longitude'])*u.deg,
-        height=float(prop['elevation'])*u.m
-    )
-    c = SkyCoord(ra=ra * u.radian, dec=dec * u.radian, frame='icrs', location=loc, obstime=time).transform_to('altaz').altaz
-    return c.az.rad, c.alt.rad
-
-
-def ho2eq(az, alt, prop, time):
-    loc = EarthLocation.from_geodetic(
-        lat=float(prop['latitude'])*u.deg,
-        lon=float(prop['longitude'])*u.deg,
-        height=float(prop['elevation'])*u.m
-    )
-    c = SkyCoord(az=az * u.radian, alt=alt * u.radian, location=loc, frame='altaz', obstime=time).transform_to('icrs')
-    return c.ra.rad, c.dec.rad
-
-
-def equatorial2horizontal(ra, dec, observer):
-    '''
-    Transforms from right ascension, declination to azimuth, altitude for
-    the given observer.
-    Formulas are taken from https://goo.gl/1wMU4u
-
-    Parameters
-    ----------
-
-    ra : number or array-like
-        right ascension in radians of the object of interest
-
-    dec : number or array-like
-        declination in radians of the object of interest
-
-    observer : ephem.Observer
-        the oberserver for which azimuth and altitude are calculated
-
-    Returns
-    -------
-    az : number or numpy.ndarray
-        azimuth in radians for the given ra, dec
-    alt : number or numpy.ndarray
-        altitude in radians for the given ra, dec
-    '''
-
-    obs_lat = float(observer.lat)
-
-    h = observer.sidereal_time() - ra
-    alt = np.arcsin(np.sin(obs_lat) * np.sin(dec) + np.cos(obs_lat) * np.cos(dec) * np.cos(h))
-    az = np.arctan2(np.sin(h), np.cos(h) * np.sin(obs_lat) - np.tan(dec) * np.cos(obs_lat))
-
-    # correction for camera orientation
-    az = np.mod(az + np.pi, 2 * np.pi)
-    return az, alt
 
 
 def celObjects_dict(config):
@@ -1049,7 +917,7 @@ def filter_catalogue(catalogue, rng):
 
     popped = 0  # count popped stars
     i1 = 0  # index of star that will be checked
-    while i1 < len(positionList)-1:
+    while i1 < len(positionList) - 1:
         if popped % 50 == 0:
             print('Left to process / size of filtered catalogue: {} / {}'.format(len(positionList)-i1, len(positionList)))
         # calculate distance to all brighter stars
@@ -1091,7 +959,7 @@ def process_image(images, data, configList, args):
             # stop once a config file does not meet the condition. We assume that the config files are ordered
             # such that the start times will be processed in ascending order
             break
-    if config == None:
+    if config is None:
         log.error('No config file with valid start date < {}'.format(images['timestamp']))
         return
 
@@ -1102,7 +970,7 @@ def process_image(images, data, configList, args):
 
 
     # stop processing if sun is too high or config file does not match
-    if images['img'].shape[1]  != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):
+    if images['img'].shape[1] != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):
         log.error('Resolution does not match: {}!={}. Wrong config file?'.format(images['img'].shape,config['image']['resolution']))
         return
     sun = ephem.Sun()
@@ -1120,7 +988,6 @@ def process_image(images, data, configList, args):
     except BufferError:
         output['hash'] = sha1(np.ascontiguousarray(images['img']).data).hexdigest()
 
-
     # create cropping mask for unneccessary image regions.
     crop_mask = get_crop_mask(images['img'], config['crop'])
 
@@ -1131,6 +998,7 @@ def process_image(images, data, configList, args):
     if stars.empty:
         log.error('No stars in DataFrame. Maybe all got removed by cropping? No analysis possible.')
         return
+
     # also crop the moon
     crop_mask = update_crop_moon(crop_mask, celObjects['moon'], config)
     images['img'][crop_mask] = np.NaN
@@ -1140,7 +1008,7 @@ def process_image(images, data, configList, args):
 
     # calculate response of stars with image kernel
     if args['--kernel']:
-        #kernelSize = float(args['--kernel']),
+        # kernelSize = float(args['--kernel']),
         kernelSize = np.round(np.arange(1, float(args['--kernel'])+0.1, 0.1),1)
         stars_orig = stars.copy()
     else:
@@ -1156,7 +1024,7 @@ def process_image(images, data, configList, args):
         stars['kernel'] = k
 
         # prepare LoG kernel
-        x,y = np.meshgrid(range(int(np.floor(-3*k)), int(np.ceil(3*k+1))), range(int(np.floor(-3*k)), int(np.ceil(3*k+1))))
+        x, y = np.meshgrid(range(int(np.floor(-3*k)), int(np.ceil(3*k+1))), range(int(np.floor(-3*k)), int(np.ceil(3*k+1))))
         LoG_kernel = LoG(x, y, k)
 
         # chose the response function and apply it to the image
@@ -1204,9 +1072,10 @@ def process_image(images, data, configList, args):
         # calculate x and y position where response has its max value (search within 'tolerance' range)
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
-            stars = pd.concat([stars.drop(['maxX','maxY'], errors='ignore', axis=1), stars.apply(
-                    lambda s : findLocalMaxPos(resp, s.x, s.y, tolerance),
-                    axis=1)], axis=1
+            stars = pd.concat([
+                stars.drop(['maxX', 'maxY'], errors='ignore', axis=1),
+                stars.apply(lambda s : findLocalMaxPos(resp, s.x, s.y, tolerance), axis=1)],
+                axis=1
             )
 
         # drop stars that got mistaken for a brighter neighboor
@@ -1216,8 +1085,8 @@ def process_image(images, data, configList, args):
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
-        #stars['response_mean'] = stars.apply(lambda s : findLocalMean(img, s.x, s.y, 50), axis=1)
-        #stars['response_std'] = stars.apply(lambda s : findLocalStd(img, s.x, s.y, 50), axis=1)
+        # stars['response_mean'] = stars.apply(lambda s : findLocalMean(img, s.x, s.y, 50), axis=1)
+        # stars['response_std'] = stars.apply(lambda s : findLocalStd(img, s.x, s.y, 50), axis=1)
         stars.query('response > 1e-100', inplace=True)
 
         # correct atmospherice absorbtion
