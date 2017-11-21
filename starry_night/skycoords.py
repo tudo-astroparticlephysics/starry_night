@@ -1,9 +1,26 @@
 from astropy.coordinates import SkyCoord, EarthLocation
 import astropy.units as u
+from astropy.coordinates.angle_utilities import angular_separation
 import ephem
 import numpy as np
 
 from .optics import theta2r
+
+
+def degDist(ra1, ra2, dec1, dec2):
+    '''
+    Returns great circle distance between two points on a sphere in degree.
+
+    Input: ra and dec in rad
+    Output: Angle in degree
+    '''
+    return angular_separation(
+        ra1 * u.rad,
+        dec1 * u.rad,
+        ra2 * u.rad,
+        dec2 * u.rad
+    ).to(u.deg).value
+
 
 
 def obs_setup(properties):
