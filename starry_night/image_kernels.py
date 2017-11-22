@@ -1,6 +1,7 @@
 import numpy as np
 from astropy.convolution import convolve, convolve_fft
 import skimage.filters
+import warnings
 
 
 def LoG(x, y, sigma):
@@ -27,7 +28,9 @@ def create_log_kernel(kernel_size):
 
 
 def apply_log_kernel(image, kernel_size):
-    return convolve_fft(image, create_log_kernel(kernel_size))
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        return convolve_fft(image, create_log_kernel(kernel_size))
 
 
 def apply_sobel_kernel(image):
@@ -37,8 +40,11 @@ def apply_sobel_kernel(image):
     kernel2 = [[1, 0, -1],
                [2, 0, -2],
                [1, 0, -1]]
-    result = convolve(image, kernel1)**2
-    result += convolve(image, kernel2)**2
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        result = convolve(image, kernel1)**2
+        result += convolve(image, kernel2)**2
 
     return result
 
@@ -50,6 +56,8 @@ def apply_gradient(image):
 
 
 def apply_difference_of_gaussians(image, kernel_size, ratio=1.6):
-    resp = skimage.filters.gaussian(image, sigma=kernel_size)
-    resp -= skimage.filters.gaussian(image, sigma=ratio * kernel_size)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        resp = skimage.filters.gaussian(image, sigma=kernel_size)
+        resp -= skimage.filters.gaussian(image, sigma=ratio * kernel_size)
     return resp

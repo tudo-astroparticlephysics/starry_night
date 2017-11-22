@@ -787,28 +787,21 @@ def process_image(image, timestamp, data, configs, args):
         # result will be stored as 'resp'
         if args['--function'] == 'All' or args['--ratescan']:
             grad = apply_gradient(image)
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore')
-                sobel = apply_sobel_kernel(image)
-                log = apply_log_kernel(image, k)
+            sobel = apply_sobel_kernel(image)
+            log = apply_log_kernel(image, k)
 
             grad[crop_mask] = np.NaN
             sobel[crop_mask] = np.NaN
             log[crop_mask] = np.NaN
-
             resp = log
         elif args['--function'] == 'DoG':
             resp = apply_difference_of_gaussians(image, k)
         elif args['--function'] == 'LoG':
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore')
-                resp = apply_log_kernel(image, k)
+            resp = apply_log_kernel(image, k)
         elif args['--function'] == 'Grad':
             resp = apply_gradient(image)
         elif args['--function'] == 'Sobel':
-            with warnings.catch_warnings():
-                warnings.simplefilter('ignore')
-                resp = apply_sobel_kernel(image)
+            resp = apply_sobel_kernel(image)
         else:
             log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
             sys.exit(1)
