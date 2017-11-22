@@ -167,7 +167,7 @@ def main():
         # download image(s) from URL
         while True:
             try:
-                img = downloadImg(
+                image_dict = downloadImg(
                     config['properties']['url'],
                     timeout=10,
                 )
@@ -181,7 +181,10 @@ def main():
                 time.sleep(30)
                 continue
 
-            results.append(skycam.process_image(img, data, configList, args))
+            results.append(skycam.process_image(
+                image_dict['img'], image_dict['timestamp'], data, configList, args
+            ))
+
             if not args['--daemon']:
                 log.info('Do not download any more images because option --daemon is not set')
                 break
@@ -215,7 +218,7 @@ def main():
         def process_image(img):
             image_dict = getImageDict(img, configList[0])
             return skycam.process_image(
-                image_dict, data, configList, args
+                image_dict['img'], image_dict['timestamp'], data, configList, args
             )
 
         # don't use multiprocessing in debug mode

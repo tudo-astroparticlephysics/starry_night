@@ -694,7 +694,7 @@ def filter_catalogue(catalogue, rng):
     return c.ix[indexList]
 
 
-def process_image(images, data, configList, args):
+def process_image(image, timestamp, data, configList, args):
     '''
     This function applies all calculations to an image and returns results as dict.
     For details read the comments below.
@@ -704,68 +704,72 @@ def process_image(images, data, configList, args):
     log = logging.getLogger(__name__)
 
     output = dict()
-    if not images:
-        return
 
     config = None
     for i in range(len(configList)):
-        if np.datetime64(configList[i]['properties']['useConfAfter']) < np.datetime64(images['timestamp']):
+        if np.datetime64(configList[i]['properties']['useConfAfter']) < np.datetime64(timestamp):
             config = configList[i]
         else:
             # stop once a config file does not meet the condition. We assume that the config files are ordered
             # such that the start times will be processed in ascending order
             break
     if config is None:
-        log.error('No config file with valid start date < {}'.format(images['timestamp']))
+        log.error('No config file with valid start date < {}'.format(timestamp))
         return
 
-    log.info('Processing image taken at: {}'.format(images['timestamp']))
+    log.info('Processing image taken at: {}'.format(timestamp))
     observer = obs_setup(config['properties'])
-    observer.date = images['timestamp']
-    data['timestamp'] = images['timestamp']
-
+    observer.date = timestamp
 
     # stop processing if sun is too high or config file does not match
-    if images['img'].shape[1] != int(config['image']['resolution'].split(',')[0]) or images['img'].shape[0]  != int(config['image']['resolution'].split(',')[1]):
-        log.error('Resolution does not match: {}!={}. Wrong config file?'.format(images['img'].shape,config['image']['resolution']))
+    reference_shape = tuple(map(int, config['image']['resolution'].split(',')))
+    if image.shape == reference_shape:
+        log.error(
+            'Resolution does not match: {} != {}. Wrong config file?'.format(
+                image.shape, reference_shape
+            )
+        )
         return
+
     sun = ephem.Sun()
     sun.compute(observer)
     moon = ephem.Moon()
     moon.compute(observer)
     if np.rad2deg(sun.alt) > -15:
-        log.info('Sun too high: {}° above horizon. We start below -15°, current time: {}'.format(np.round(np.rad2deg(sun.alt),2), images['timestamp']))
+        log.info((
+            'Sun too high: {:1.2f}° above horizon.'
+            ' We start below -15°, current time: {}'
+        ).format(np.rad2deg(sun.alt), timestamp))
         return
 
     # put timestamp and hash sum into output dict
-    output['timestamp'] = images['timestamp']
+    output['timestamp'] = timestamp
     try:
-        output['hash'] = sha1(images['img'].data).hexdigest()
+        output['hash'] = sha1(image.data).hexdigest()
     except BufferError:
-        output['hash'] = sha1(np.ascontiguousarray(images['img']).data).hexdigest()
+        output['hash'] = sha1(np.ascontiguousarray(image).data).hexdigest()
 
     # create cropping mask for unneccessary image regions.
-    crop_mask = get_crop_mask(images['img'], config['crop'])
+    crop_mask = get_crop_mask(image, config['crop'])
 
     # update celestial objects
     celObjects = update_star_position(data, observer, config, crop_mask, args)
     # merge objects (ignore planets, because they are bigger than stars and mess up the detection)
-    stars = pd.concat([celObjects['stars'],])# celObjects['planets']])
+    stars = pd.concat([celObjects['stars'], ]) # celObjects['planets']])
     if stars.empty:
         log.error('No stars in DataFrame. Maybe all got removed by cropping? No analysis possible.')
         return
 
     # also crop the moon
     crop_mask = update_crop_moon(crop_mask, celObjects['moon'], config)
-    images['img'][crop_mask] = np.NaN
-    output['brightness_mean'] = np.nanmean(images['img'])
-    output['brightness_std'] = np.nanmean(images['img'])
-    img = images['img']
+    image[crop_mask] = np.NaN
+    output['brightness_mean'] = np.nanmean(image)
+    output['brightness_std'] = np.nanmean(image)
 
     # calculate response of stars with image kernel
     if args['--kernel']:
         # kernelSize = float(args['--kernel']),
-        kernelSize = np.round(np.arange(1, float(args['--kernel'])+0.1, 0.1),1)
+        kernelSize = np.round(np.arange(1, float(args['--kernel']) + 0.1, 0.1), 1)
         stars_orig = stars.copy()
     else:
         kernelSize = [float(config['analysis']['kernelsize'])]
@@ -786,37 +790,34 @@ def process_image(images, data, configList, args):
         # chose the response function and apply it to the image
         # result will be stored as 'resp'
         if args['--function'] == 'All' or args['--ratescan']:
-            grad = (img - np.roll(img, 1, axis=0)).clip(min=0)**2 + (img - np.roll(img, 1, axis=1)).clip(min=0)**2
+            grad = (image - np.roll(image, 1, axis=0)).clip(min=0)**2 + (image - np.roll(image, 1, axis=1)).clip(min=0)**2
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                sobel = convolve(img, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(img, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
-                log = convolve_fft(img, LoG_kernel)
+                sobel = convolve(image, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(image, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
+                log = convolve_fft(image, LoG_kernel)
 
             grad[crop_mask] = np.NaN
             sobel[crop_mask] = np.NaN
             log[crop_mask] = np.NaN
 
-            images['grad'] = grad
-            images['sobel'] = sobel
-            images['log'] = log
             resp = log
         elif args['--function'] == 'DoG':
-            resp = skimage.filters.gaussian(img, sigma=k) - skimage.filters.gaussian(img, sigma=1.6*k)
+            resp = skimage.filters.gaussian(image, sigma=k) - skimage.filters.gaussian(image, sigma=1.6*k)
         elif args['--function'] == 'LoG':
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                resp = convolve_fft(img, LoG_kernel)
+                resp = convolve_fft(image, LoG_kernel)
         elif args['--function'] == 'Grad':
-            resp = ((img - np.roll(img, 1, axis=0)).clip(min=0))**2 + ((img - np.roll(img, 1, axis=1)).clip(min=0))**2
+            resp = ((image - np.roll(image, 1, axis=0)).clip(min=0))**2 + ((image - np.roll(image, 1, axis=1)).clip(min=0))**2
         elif args['--function'] == 'Sobel':
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                resp = convolve(img, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(img, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
+                resp = convolve(image, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(image, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
         else:
             log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
             sys.exit(1)
         resp[crop_mask] = np.NaN
-        images['response'] = resp
+        response = resp
 
 
         # to correct abberation the max filter response withing tolerance distance around a star will be chosen as 'real' star position
@@ -841,7 +842,7 @@ def process_image(images, data, configList, args):
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
-        # stars['response_mean'] = stars.apply(lambda s : findLocalMean(img, s.x, s.y, 50), axis=1)
+        # stars['response_mean'] = stars.apply(lambda s : findLocalMean(image, s.x, s.y, 50), axis=1)
         # stars['response_std'] = stars.apply(lambda s : findLocalStd(img, s.x, s.y, 50), axis=1)
         stars.query('response > 1e-100', inplace=True)
 
@@ -926,15 +927,15 @@ def process_image(images, data, configList, args):
             'chose_sigma_{}.png'.format(config['properties']['name']),
         )
 
-    output['img'] = img
+    output['img'] = image
     if (args['--cam'] or args['--daemon']) and args['-s']:
         outputfile = 'cam_image_{}_{}.png'.format(
             config['properties']['name'],
-            images['timestamp'].isoformat()
+            timestamp.isoformat()
         )
         plot_camera_image(
-            img,
-            images['timestamp'],
+            image,
+            timestamp,
             stars,
             celObjects,
             outputfile=outputfile,
@@ -950,10 +951,10 @@ def process_image(images, data, configList, args):
         if args['--response'] or args['--daemon']:
             plot_kernel_response(
                 llim, ulim, float(config['analysis']['vmaglimit']),
-                img, data, stars,
+                image, data, stars,
                 outputfile='response_{}_{}.png'.format(
                     args['--function'],
-                    images['timestamp'].isoformat()
+                    timestamp.isoformat()
                 )
             )
 
@@ -1006,17 +1007,17 @@ def process_image(images, data, configList, args):
     if args['--cloudmap'] or args['--cloudtrack'] or args['--daemon']:
         log.debug('Calculating cloud map')
         # empirical good value for radius of map: Area r**2 * PI should contain 0.75 stars on average
-        cloud_map = calc_cloud_map(stars, np.sqrt(1./ (len(stars.index)/float(config['image']['radius'])**2)), img.shape, weight=True)
+        cloud_map = calc_cloud_map(stars, np.sqrt(1./ (len(stars.index)/float(config['image']['radius'])**2)), image.shape, weight=True)
         cloud_map[crop_mask] = 1
         if args['--cloudtrack']:
             output['cloudmap'] = cloud_map
             np.save('cMap_{}'.format(output['timestamp']), np.nan_to_num(cloud_map))
         if args['--cloudmap']:
             plot_cloudmap_and_image(
-                img,
+                image,
                 cloud_map,
-                images['timestamp'],
-                'cloudMap_{}.png'.format(images['timestamp'].isoformat())
+                timestamp,
+                'cloudMap_{}.png'.format(timestamp.isoformat())
             )
         if args['--daemon']:
             plot_cloudmap(
@@ -1029,7 +1030,6 @@ def process_image(images, data, configList, args):
         log.debug('Cloudmap not available. Calculating global_coverage not possible')
         output['global_coverage'] = np.float64(-1)
 
-    del images
     output['stars'] = stars
     output['points_of_interest'] = celObjects['points_of_interest']
     output['sun_alt'] = celObjects['sun']['altitude']
