@@ -41,6 +41,7 @@ from .image_kernels import (
     apply_gradient,
     apply_difference_of_gaussians
 )
+from .star_detection import calculate_star_visibility
 
 
 def lin(x, m, b):
@@ -860,20 +861,12 @@ def process_image(image, timestamp, data, configs, args):
                 #stars.loc[stars.vmag.values < intersection, 'visible'] = 0
                 stars.query('vmag > {}'.format(intersection), inplace=True)
 
-        # calculate visibility percentage
-        # if response > visibleUpperLimit -> visible=1
-        # if response < visibleUpperLimit -> visible=0
-        # if in between: scale linear
-        stars['visible'] = np.minimum(
-                1,
-                np.maximum(
-                    0,
-                    (np.log10(stars['response']) - (stars['vmag']*llim[0] + llim[1])) /
-                    ((stars['vmag']*ulim[0] + ulim[1]) - (stars['vmag']*float(llim[0]) + llim[1]))
-                    )
-                )
-
-        # append results
+        stars['visible'] = calculate_star_visibility(
+            stars['response'],
+            stars['vmag'],
+            llim,
+            ulim,
+        )
         kernelResults.append(stars)
 
     del stars
