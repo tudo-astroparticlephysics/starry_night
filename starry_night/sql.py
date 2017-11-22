@@ -1,12 +1,13 @@
-from sqlalchemy import Column, Integer, String, VARCHAR, DateTime, Float, ForeignKey, create_engine, MetaData
+from sqlalchemy import Column, Integer, VARCHAR, DateTime, Float, ForeignKey, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
 import logging
-from IPython import embed
+import sys
 
 
 Base = declarative_base()
+
 
 class SqlEntry(Base):
     '''
@@ -46,19 +47,18 @@ def writeSQL(config, data):
     engine = create_engine(config['SQL']['connection'])
     sMaker = sessionmaker(bind=engine)
     session = scoped_session(sMaker)
-    
+
     session.add(SqlEntry(
-                    timestamp=data['timestamp'],
-                    hashsum=data['hash'],
-                    sunAlt=data['sun_alt'],
-                    moonAlt=data['moon_alt'],
-                    moonPhase=data['moon_phase'],
-                    brightnessMean=data['brightness_mean'].item(),
-                    brightnessStd=data['brightness_std'].item(),
-                    global_star_perc = data['global_star_perc'].item(),
-                    global_coverage = data['global_coverage'].item()
-                )
-    )
+        timestamp=data['timestamp'],
+        hashsum=data['hash'],
+        sunAlt=data['sun_alt'],
+        moonAlt=data['moon_alt'],
+        moonPhase=data['moon_phase'],
+        brightnessMean=data['brightness_mean'].item(),
+        brightnessStd=data['brightness_std'].item(),
+        global_star_perc = data['global_star_perc'].item(),
+        global_coverage = data['global_coverage'].item()
+    ))
 
     Base.metadata.create_all(engine)
     log.debug('Commit SQL Part 1')
