@@ -41,12 +41,10 @@ import sys
 import time
 import numpy as np
 import pandas as pd
-import configparser
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
-from functools import partial
 from scipy.optimize import curve_fit
 from re import split
 from getpass import getpass
@@ -58,6 +56,7 @@ from tables import HDF5ExtError
 
 from .. import skycam, cloud_tracker
 from ..io import getImageDict, downloadImg, TooEarlyError
+from ..config import load_config
 
 #######################################################
 
@@ -109,33 +108,7 @@ def main():
         log.info('DEBUG MODE - NOT FOR REGULAR USE')
         log.setLevel(logging.DEBUG)
 
-    configList = list()
-    conf_succ = 0
-
-    # try to open config file of package
-    path = pkg_resources.resource_filename('starry_night','data/')
-    for root, dirs, files in os.walk(path):
-        for f in sorted(files):
-            if args['-c'] in f:
-                log.debug('Opening config file: {}'.format(os.path.join(root,f)))
-                configList.append(configparser.RawConfigParser())
-                try:
-                    conf_succ += len(configList[-1].read(os.path.join(root,f)))
-                except UnicodeDecodeError:
-                    log.error('Could not open conf file: {}'.format(os.path.join(root,f)))
-                    configList.pop(-1)
-    # also check if config file was path to a config file somewhere else
-    if conf_succ == 0 and os.path.isfile(args['-c']):
-        log.debug('Parsing config file: {}'.format(args['-c']))
-        configList.append(configparser.RawConfigParser())
-        conf_succ += len(configList[-1].read(args['-c']))
-
-    if conf_succ == 0:
-        configList.clear()
-        log.error('Unable to parse any config file. Does the file exist?')
-        sys.exit(1)
-    del conf_succ
-
+    configList = load_config(args['-c'])
     # use first config file, the other ones are only needed if the camera was moved
     config = configList[0]
 
