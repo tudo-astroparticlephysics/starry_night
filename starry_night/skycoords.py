@@ -22,13 +22,12 @@ def degDist(ra1, ra2, dec1, dec2):
     ).to(u.deg).value
 
 
-
-def obs_setup(properties):
+def obs_setup(latitude, longitude, elevation):
     ''' creates an ephem.Observer for the MAGIC Site at given date '''
     obs = ephem.Observer()
-    obs.lon = '-17:53:28'
-    obs.lat = '28:45:42'
-    obs.elevation = 2200
+    obs.lat = latitude
+    obs.lon = longitude
+    obs.elevation = elevation
     obs.epoch = ephem.J2000
     return obs
 

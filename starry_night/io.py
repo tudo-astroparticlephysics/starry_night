@@ -122,7 +122,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             time = datetime.strptime(
                 data['UTC1'][0],
                 '%Y/%m/%d %H:%M:%S'
-                # config['properties']['timeformat']
+                # config['properties']['timeFormat']
             )
         except (KeyError, ValueError, OSError, FileNotFoundError) as e:
             log.error('Failed to open image {}: {}'.format(filepath, e))
@@ -141,7 +141,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
                 '''
                 time = datetime.strptime(
                     hdulist[0].header[config['properties']['timeKey']],
-                    config['properties']['timeformat'],
+                    config['properties']['timeFormat'],
                     )
                 '''
                 time = None
@@ -158,7 +158,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             else:
                 time = datetime.strptime(
                     filename,
-                    config['properties']['timeformat'],
+                    config['properties']['timeFormat'],
                 )
         except (ValueError, KeyError, OSError, FileNotFoundError) as e:
             log.error('Error parsing timestamp of {}: {}'.format(filepath, e))
@@ -173,7 +173,7 @@ def getImageDict(filepath, config, crop=None, fmt=None):
             return
         try:
             if fmt is None:
-                time = datetime.strptime(filename, config['properties']['timeformat'])
+                time = datetime.strptime(filename, config['properties']['timeFormat'])
             else:
                 time = datetime.strptime(filename, fmt)
 
@@ -185,11 +185,11 @@ def getImageDict(filepath, config, crop=None, fmt=None):
                 try:
                     time = datetime.strptime(filename, 'magic_allskycam_%Y%m%d_%H%M%S')
                 except ValueError:
-                    fmt = (config['properties']['timeformat'] if fmt is None else fmt)
+                    fmt = (config['properties']['timeFormat'] if fmt is None else fmt)
                     log.error('{},{}'.format(filename,filepath))
                     log.error('Unable to parse image time from filename. Maybe format string is wrong.')
                     return
-    time += timedelta(minutes=float(config['properties']['timeoffset']))
+    time += timedelta(minutes=float(config['properties']['timeOffset']))
     img = img.astype('float32') # needs to be float because we want to set some values NaN while cropping
     return dict({'img': img, 'timestamp': time})
 

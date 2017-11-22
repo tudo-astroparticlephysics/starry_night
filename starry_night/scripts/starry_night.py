@@ -119,9 +119,9 @@ def main():
     data = skycam.celObjects_dict(config)
 
     if args['--vmag']:
-        data['vmaglimit'] = args['--vmag']
+        data['vmagLimit'] = args['--vmag']
     else:
-        data['vmaglimit'] = float(config['analysis']['vmaglimit'])
+        data['vmagLimit'] = float(config['analysis']['vmagLimit'])
 
     # prepare everything for sql connection
     if args['--sql']:
@@ -505,7 +505,7 @@ def main():
         return 10**(m*x+b)
 
     sys.exit(0)
-    fit_stars = df.query('0 < vmag < {}'.format(float(data['vmaglimit'])))
+    fit_stars = df.query('0 < vmag < {}'.format(float(data['vmagLimit'])))
     popt, pcov = curve_fit(logf, fit_stars.vmag.values, fit_stars.response.values, sigma=1/fit_stars.vmag.values, p0=(-0.2, 2))
     x = np.linspace(-3+fit_stars.vmag.min(), fit_stars.vmag.max(), 20)
     y = logf(x, popt[0], popt[1]-0.3)

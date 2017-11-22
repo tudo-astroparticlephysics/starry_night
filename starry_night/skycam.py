@@ -35,6 +35,7 @@ from .plotting import (
     plot_ratescan,
 )
 from .io import getMagicLidar
+from .config import get_config_for_timestamp
 
 
 def LoG(x, y, sigma):
@@ -339,8 +340,8 @@ def update_star_position(data, observer, conf, crop, args):
             }, ignore_index=True)
 
     try:
-        stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), data['vmaglimit']), inplace=True)
-        planets.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), data['vmaglimit']), inplace=True)
+        stars.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), data['vmagLimit']), inplace=True)
+        planets.query('altitude > {} & vmag < {}'.format(np.deg2rad(90 - float(conf['image']['openingangle'])), data['vmagLimit']), inplace=True)
         points_of_interest.query('altitude > {}'.format(np.deg2rad(90 - float(conf['image']['openingangle']))), inplace=True)
     except:
         log.error('Using altitude or vmag limit failed!')
@@ -694,7 +695,7 @@ def filter_catalogue(catalogue, rng):
     return c.ix[indexList]
 
 
-def process_image(image, timestamp, data, configList, args):
+def process_image(image, timestamp, data, configs, args):
     '''
     This function applies all calculations to an image and returns results as dict.
     For details read the comments below.
@@ -703,22 +704,18 @@ def process_image(image, timestamp, data, configList, args):
     '''
     log = logging.getLogger(__name__)
 
-    output = dict()
-
-    config = None
-    for i in range(len(configList)):
-        if np.datetime64(configList[i]['properties']['useConfAfter']) < np.datetime64(timestamp):
-            config = configList[i]
-        else:
-            # stop once a config file does not meet the condition. We assume that the config files are ordered
-            # such that the start times will be processed in ascending order
-            break
-    if config is None:
-        log.error('No config file with valid start date < {}'.format(timestamp))
+    try:
+        config = get_config_for_timestamp(configs, timestamp)
+    except ValueError:
+        log.error('No valid config found for {}'.format(timestamp))
         return
 
     log.info('Processing image taken at: {}'.format(timestamp))
-    observer = obs_setup(config['properties'])
+    observer = obs_setup(
+        config['properties']['latitude'],
+        config['properties']['longitude'],
+        float(config['properties']['elevation']),
+    )
     observer.date = timestamp
 
     # stop processing if sun is too high or config file does not match
@@ -743,6 +740,7 @@ def process_image(image, timestamp, data, configList, args):
         return
 
     # put timestamp and hash sum into output dict
+    output = dict()
     output['timestamp'] = timestamp
     try:
         output['hash'] = sha1(image.data).hexdigest()
@@ -864,9 +862,9 @@ def process_image(image, timestamp, data, configList, args):
         if ulim[0] != llim[0]:
             intersection = (llim[1] - ulim[1]) / (ulim[0] - llim[0])
             if ulim[0] < llim[0]:
-                data['vmaglimit'] = min(intersection, data['vmaglimit'])
-                #stars.loc[stars.vmag.values > data['vmaglimit'], 'visible'] = 0
-                stars.query('vmag < {}'.format(data['vmaglimit']), inplace=True)
+                data['vmagLimit'] = min(intersection, data['vmagLimit'])
+                #stars.loc[stars.vmag.values > data['vmagLimit'], 'visible'] = 0
+                stars.query('vmag < {}'.format(data['vmagLimit']), inplace=True)
             else:
                 #stars.loc[stars.vmag.values < intersection, 'visible'] = 0
                 stars.query('vmag > {}'.format(intersection), inplace=True)
@@ -950,7 +948,7 @@ def process_image(image, timestamp, data, configList, args):
     if args['--single'] or args['--daemon']:
         if args['--response'] or args['--daemon']:
             plot_kernel_response(
-                llim, ulim, float(config['analysis']['vmaglimit']),
+                llim, ulim, float(config['analysis']['vmagLimit']),
                 image, data, stars,
                 outputfile='response_{}_{}.png'.format(
                     args['--function'],

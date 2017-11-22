@@ -2,6 +2,8 @@ import os
 import pkg_resources
 import logging
 from configparser import RawConfigParser
+from datetime import datetime
+from dateutil.parser import parse as parse_date
 
 log = logging.getLogger(__name__)
 
@@ -40,3 +42,20 @@ def load_config(config):
         raise
 
     return configs
+
+
+def get_config_for_timestamp(configs, image_timestamp):
+    date_sorted_configs = sorted(configs, key=lambda c: c['properties']['useConfAfter'])
+
+    best_config_date = datetime.min
+    best_config = None
+
+    for config in date_sorted_configs:
+        config_date = parse_date(config['properties']['useConfAfter'])
+        if config_date < image_timestamp and config_date > best_config_date:
+            best_config = config
+
+    if best_config is None:
+        raise ValueError('No config found for {}'.format(image_timestamp))
+
+    return best_config
