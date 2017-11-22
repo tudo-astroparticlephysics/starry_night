@@ -112,10 +112,12 @@ def main():
     # use first config file, the other ones are only needed if the camera was moved
     config = configList[0]
 
-    # data is a container for global data and variables which do belong neither to config nor to args.
+    # data is a container for global data
+    # and variables which do belong neither to config nor to args.
     # data will be passed to all threads and is available for the analysis
     log.debug('Parsing Catalogue')
     data = skycam.celObjects_dict(config)
+
     if args['--vmag']:
         data['vmaglimit'] = args['--vmag']
     else:
@@ -232,20 +234,23 @@ def main():
 
     # drop all empty dictionaries (image processing was aborted because of high sun)
     # and merge the remaining files
-    i=0
-    while i<len(results):
+    i = 0
+    while i < len(results):
         if not results[i]:
             results.pop(i)
         else:
-            i+=1
+            i += 1
 
     imgCount = len(results)
     log.info('{} images were processed successfully.'.format(imgCount))
 
 
     #####################################################
-
     # no more processing if only a few images were processed successfully
+    if len(args['<image>']) == 1:
+        log.info('Done')
+        sys.exit(0)
+
     if len(results) <= 5:
         log.info('Stop because only {} image(s) were processed. And we don\'t have enough data for further steps.'.format(len(results)))
         sys.exit(0)
