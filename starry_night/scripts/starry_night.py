@@ -257,7 +257,7 @@ def main():
 
         # don't use multiprocessing in debug mode
         # process all images and store results
-        if args['--debug']:
+        if args['--debug'] or len(args['<image>']) == 1:
             for img in args['<image>']:
                 results.append(par(img))
         else:
