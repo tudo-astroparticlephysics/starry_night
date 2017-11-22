@@ -151,8 +151,6 @@ def main():
     else:
         data['lidarpwd'] = None
 
-
-
     # read positioning file if any
     if args['-p']:
         log.info('Parsing positioning file.')
@@ -167,7 +165,7 @@ def main():
 
     if not args['<image>']:
         # download image(s) from URL
-        while 1:
+        while True:
             try:
                 img = downloadImg(
                     config['properties']['url'],
@@ -195,8 +193,8 @@ def main():
 
         i = 0
         while len(args['<image>']) > i:
-            if (i+1)%2000 == 0:
-                print('Prepared {} images of {}'.format(i+1, len(args['<image>'])))
+            if (i + 1) % 2000 == 0:
+                print('Prepared {} images of {}'.format(i + 1, len(args['<image>'])))
 
             # expand content of directories
             if os.path.isdir(args['<image>'][i]):
@@ -244,7 +242,6 @@ def main():
     imgCount = len(results)
     log.info('{} images were processed successfully.'.format(imgCount))
 
-
     #####################################################
     # no more processing if only a few images were processed successfully
     if len(args['<image>']) == 1:
@@ -264,10 +261,9 @@ def main():
     if args['--cloudtrack']:
         cloudmap_list = list(map(lambda x: x['cloudmap'], results)), timestamp_list
 
-
-    #df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
+    # df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
     df = pd.concat(star_list)
-    df = df.groupby('HIP').filter(lambda x : len(x.index) > 5)
+    df = df.groupby('HIP').filter(lambda x: len(x.index) > 5)
     mean = df.groupby('HIP').mean()
     std = df.groupby('HIP').std()
 
@@ -276,10 +272,6 @@ def main():
     del timestamp_list
 
     df.sortlevel(inplace=True)
-    #d.loc[(slice(None), 746), :]
-    #d.loc[(slice(None), 746),:]['response3'].plot.hist(10)
-
-
 
     #####################################################
 
@@ -288,12 +280,14 @@ def main():
             gr = df.groupby('HIP')
             res = list()
             for i, stars in gr:
-                res.append(stars.query('response_orig == {}'.format(stars.response_orig.max()))[['HIP','vmag','kernel','response']].values)
+                res.append(
+                    stars.query(
+                        'response_orig == {}'.format(stars.response_orig.max())
+                    )[['HIP', 'vmag', 'kernel', 'response']].values
+                )
             b = np.array(res)
-            plt.plot(b[:,0,0],b[:,0,2])
+            plt.plot(b[:, 0, 0], b[:, 0, 2])
             plt.show()
-
-
 
     if args['--airmass']:
         r = []
