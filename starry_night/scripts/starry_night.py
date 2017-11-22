@@ -182,7 +182,7 @@ def main():
                 continue
 
             results.append(skycam.process_image(
-                image_dict['img'], image_dict['timestamp'], data, configList, args
+                image_dict['img'], image_dict['timestamp'], data, configList, args, args['--function']
             ))
 
             if not args['--daemon']:
@@ -218,7 +218,7 @@ def main():
         def process_image(img):
             image_dict = getImageDict(img, configList[0])
             return skycam.process_image(
-                image_dict['img'], image_dict['timestamp'], data, configList, args
+                image_dict['img'], image_dict['timestamp'], data, configList, args, args['--function']
             )
 
         # don't use multiprocessing in debug mode

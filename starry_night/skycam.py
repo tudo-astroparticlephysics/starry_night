@@ -698,7 +698,7 @@ def hash_image(image):
         return sha1(np.ascontiguousarray(image).data).hexdigest()
 
 
-def process_image(image, timestamp, data, configs, args):
+def process_image(image, timestamp, data, configs, args, kernel_function):
     '''
     This function applies all calculations to an image and returns results as dict.
     For details read the comments below.
@@ -707,6 +707,10 @@ def process_image(image, timestamp, data, configs, args):
     '''
     log = logging.getLogger(__name__)
     image = image.copy()
+
+    allowed_kernels = {'All', 'Grad', 'DoG', 'LoG', 'Sobel'}
+    if kernel_function not in allowed_kernels:
+        raise ValueError('kernel_function must be any of {}'.format(allowed_kernels))
 
     try:
         config = get_config_for_timestamp(configs, timestamp)
@@ -786,7 +790,7 @@ def process_image(image, timestamp, data, configs, args):
 
         # chose the response function and apply it to the image
         # result will be stored as 'resp'
-        if args['--function'] == 'All' or args['--ratescan']:
+        if kernel_function == 'All' or args['--ratescan']:
             grad = apply_gradient(image)
             sobel = apply_sobel_kernel(image)
             log = apply_log_kernel(image, k)
@@ -795,17 +799,16 @@ def process_image(image, timestamp, data, configs, args):
             sobel[crop_mask] = np.NaN
             log[crop_mask] = np.NaN
             resp = log
-        elif args['--function'] == 'DoG':
+
+        elif kernel_function == 'DoG':
             resp = apply_difference_of_gaussians(image, k)
-        elif args['--function'] == 'LoG':
+        elif kernel_function == 'LoG':
             resp = apply_log_kernel(image, k)
-        elif args['--function'] == 'Grad':
+        elif kernel_function == 'Grad':
             resp = apply_gradient(image)
-        elif args['--function'] == 'Sobel':
+        elif kernel_function == 'Sobel':
             resp = apply_sobel_kernel(image)
-        else:
-            log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
-            sys.exit(1)
+
         resp[crop_mask] = np.NaN
         response = resp
 
