@@ -1,7 +1,6 @@
 from starry_night import sql
 import pandas as pd
 import numpy as np
-from matplotlib import rc
 
 import ephem
 import sys
@@ -21,6 +20,7 @@ from re import split
 
 from sqlalchemy.exc import OperationalError, InternalError
 from hashlib import sha1
+import shutil
 
 from .transmission import transmission_spheric
 from .skycoords import ho2eq, horizontal2image, equatorial2horizontal, eq2ho, obs_setup, degDist
@@ -32,6 +32,7 @@ from .plotting import (
     plot_choose_sigma,
     plot_cloudmap_and_image,
     plot_cloudmap,
+    plot_ratescan,
 )
 from .io import getMagicLidar
 
@@ -700,9 +701,6 @@ def process_image(images, data, configList, args):
 
     Use this in the main loop!
     '''
-    font = {'size'   : 25}
-    rc('font', **font)
-
     log = logging.getLogger(__name__)
 
     output = dict()
@@ -917,18 +915,48 @@ def process_image(images, data, configList, args):
     # processing done. Now plot everything
     ##################################
 
-    if args['--kernel']:
-        plot_kernel_curve(stars, config, args)
-        plot_choose_sigma(stars, kernelSize, config, args)
+    if args['--kernel'] and args['-s']:
+        plot_kernel_curve(
+            stars,
+            'kernel_curve_{}.png'.format(config['properties']['name']),
+        )
+        plot_choose_sigma(
+            stars,
+            kernelSize,
+            'chose_sigma_{}.png'.format(config['properties']['name']),
+        )
 
-
-    if args['--cam'] or args['--daemon']:
-        output['img'] = img
-        plot_camera_image(img, images, output, stars, celObjects, config, args)
+    output['img'] = img
+    if (args['--cam'] or args['--daemon']) and args['-s']:
+        outputfile = 'cam_image_{}_{}.png'.format(
+            config['properties']['name'],
+            images['timestamp'].isoformat()
+        )
+        plot_camera_image(
+            img,
+            images['timestamp'],
+            stars,
+            celObjects,
+            outputfile=outputfile,
+        )
+        # if running as daemon, also save the current file without timestamp
+        if args['--daemon']:
+            shutil.copy2(
+                outputfile,
+                'cam_image_{}.png'.format(config['properties']['name'])
+            )
 
     if args['--single'] or args['--daemon']:
         if args['--response'] or args['--daemon']:
-            plot_kernel_response(llim, ulim, img, images, data, stars, config, args)
+            plot_kernel_response(
+                llim, ulim, float(config['analysis']['vmaglimit']),
+                img, data, stars,
+                outputfile='response_{}_{}.png'.format(
+                    args['--function'],
+                    images['timestamp'].isoformat()
+                )
+            )
+
 
         if args['--ratescan']:
             log.info('Doing ratescan')
@@ -964,9 +992,9 @@ def process_image(images, data, configList, args):
             # find minimal threshold for detecting 100% of all stars and number of clusters at that threshold
             minThresholdPos = -np.array([np.argmax(gradList[::-1,0]), np.argmax(sobelList[::-1,0]), np.argmax(logList[::-1,0])]) + len(response) -1
             thresh = (response[minThresholdPos[0]], response[minThresholdPos[1]],response[minThresholdPos[2]])
-            clusters = (gradList[minThresholdPos[0],2], sobelList[minThresholdPos[1],2], logList[minThresholPods[2],2])
+            clusters = (gradList[minThresholdPos[0], 2], sobelList[minThresholdPos[1], 2], logList[minThresholdPos[2], 2])
 
-            plot_ratescan(response, sobelList, logList, gradList, minThresholdPos, args)
+            plot_ratescan(response, sobelList, logList, gradList, minThresholdPos, 'ratescan.pdf')
 
             output['response'] = response
             output['thresh'] = thresh
@@ -984,9 +1012,17 @@ def process_image(images, data, configList, args):
             output['cloudmap'] = cloud_map
             np.save('cMap_{}'.format(output['timestamp']), np.nan_to_num(cloud_map))
         if args['--cloudmap']:
-            plot_cloudmap_and_image(img, images, cloud_map, output, args)
+            plot_cloudmap_and_image(
+                img,
+                cloud_map,
+                images['timestamp'],
+                'cloudMap_{}.png'.format(images['timestamp'].isoformat())
+            )
         if args['--daemon']:
-            plot_cloudmap(cloud_map, config)
+            plot_cloudmap(
+                cloud_map,
+                'cloudMap_{}.png'.format(config['properties']['name']),
+            )
     try:
         output['global_coverage'] = np.nanmean(cloudmap)
     except NameError:

@@ -43,7 +43,7 @@ import numpy as np
 import pandas as pd
 import configparser
 import matplotlib.pyplot as plt
-from matplotlib import rc, cm
+from matplotlib import cm
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from functools import partial
@@ -54,16 +54,12 @@ from sqlalchemy import create_engine
 import os
 
 from sqlalchemy.exc import OperationalError, InternalError
-import requests.exceptions as rex
 from tables import HDF5ExtError
 
 from .. import skycam, cloud_tracker
 from ..io import getImageDict, downloadImg, TooEarlyError
 
 #######################################################
-
-font = {'size'   : 22}
-rc('font', **font)
 
 
 def wrapper(const_celestialObjects, configList, args, img):
