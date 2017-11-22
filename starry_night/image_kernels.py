@@ -1,7 +1,22 @@
 import numpy as np
-from astropy.convolution import convolve, convolve_fft
+import astropy.convolution
 import skimage.filters
 import warnings
+from functools import partial
+
+
+convolve = partial(
+    astropy.convolution.convolve,
+    nan_treatment='fill',
+    normalize_kernel=False,
+)
+
+
+convolve_fft = partial(
+    astropy.convolution.convolve,
+    nan_treatment='fill',
+    normalize_kernel=False,
+)
 
 
 def LoG(x, y, sigma):
