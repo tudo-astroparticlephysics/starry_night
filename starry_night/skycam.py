@@ -703,6 +703,7 @@ def process_image(image, timestamp, data, configs, args):
     Use this in the main loop!
     '''
     log = logging.getLogger(__name__)
+    image = image.copy()
 
     try:
         config = get_config_for_timestamp(configs, timestamp)
