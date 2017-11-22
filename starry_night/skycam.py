@@ -6,7 +6,6 @@ import ephem
 import sys
 
 from astropy.time import Time
-from astropy.convolution import convolve, convolve_fft
 
 from scipy.ndimage.measurements import label
 import skimage.filters
@@ -36,16 +35,12 @@ from .plotting import (
 )
 from .io import getMagicLidar
 from .config import get_config_for_timestamp
-
-
-def LoG(x, y, sigma):
-    '''
-    Return discretized Laplacian of Gaussian kernel.
-    Mean = 0 normalized and scale invarian by multiplying with sigma**2
-    '''
-    kernel = 1/(np.pi*sigma**4)*(1-(x**2+y**2)/(2*sigma**2))*np.exp(-(x**2+y**2)/(2*sigma**2))
-    kernel -= np.mean(kernel)
-    return kernel * sigma**2
+from .image_kernels import (
+    apply_log_kernel,
+    apply_sobel_kernel,
+    apply_gradient,
+    apply_difference_of_gaussians
+)
 
 
 def lin(x, m, b):
@@ -695,6 +690,13 @@ def filter_catalogue(catalogue, rng):
     return c.ix[indexList]
 
 
+def hash_image(image):
+    try:
+        return sha1(image.data).hexdigest()
+    except BufferError:
+        return sha1(np.ascontiguousarray(image).data).hexdigest()
+
+
 def process_image(image, timestamp, data, configs, args):
     '''
     This function applies all calculations to an image and returns results as dict.
@@ -743,10 +745,7 @@ def process_image(image, timestamp, data, configs, args):
     # put timestamp and hash sum into output dict
     output = dict()
     output['timestamp'] = timestamp
-    try:
-        output['hash'] = sha1(image.data).hexdigest()
-    except BufferError:
-        output['hash'] = sha1(np.ascontiguousarray(image).data).hexdigest()
+    output['hash'] = hash_image(image)
 
     # create cropping mask for unneccessary image regions.
     crop_mask = get_crop_mask(image, config['crop'])
@@ -772,6 +771,7 @@ def process_image(image, timestamp, data, configs, args):
         stars_orig = stars.copy()
     else:
         kernelSize = [float(config['analysis']['kernelsize'])]
+
     kernelResults = list()
 
     for k in kernelSize:
@@ -780,20 +780,17 @@ def process_image(image, timestamp, data, configs, args):
         # undo all changes, if we are testing multiple kernel sizes
         if len(kernelSize) > 1:
             stars = stars_orig.copy()
-        stars['kernel'] = k
 
-        # prepare LoG kernel
-        x, y = np.meshgrid(range(int(np.floor(-3*k)), int(np.ceil(3*k+1))), range(int(np.floor(-3*k)), int(np.ceil(3*k+1))))
-        LoG_kernel = LoG(x, y, k)
+        stars['kernel'] = k
 
         # chose the response function and apply it to the image
         # result will be stored as 'resp'
         if args['--function'] == 'All' or args['--ratescan']:
-            grad = (image - np.roll(image, 1, axis=0)).clip(min=0)**2 + (image - np.roll(image, 1, axis=1)).clip(min=0)**2
+            grad = apply_gradient(image)
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                sobel = convolve(image, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(image, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
-                log = convolve_fft(image, LoG_kernel)
+                sobel = apply_sobel_kernel(image)
+                log = apply_log_kernel(image, k)
 
             grad[crop_mask] = np.NaN
             sobel[crop_mask] = np.NaN
@@ -801,17 +798,17 @@ def process_image(image, timestamp, data, configs, args):
 
             resp = log
         elif args['--function'] == 'DoG':
-            resp = skimage.filters.gaussian(image, sigma=k) - skimage.filters.gaussian(image, sigma=1.6*k)
+            resp = apply_difference_of_gaussians(image, k)
         elif args['--function'] == 'LoG':
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                resp = convolve_fft(image, LoG_kernel)
+                resp = apply_log_kernel(image, k)
         elif args['--function'] == 'Grad':
-            resp = ((image - np.roll(image, 1, axis=0)).clip(min=0))**2 + ((image - np.roll(image, 1, axis=1)).clip(min=0))**2
+            resp = apply_gradient(image)
         elif args['--function'] == 'Sobel':
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
-                resp = convolve(image, [[1,2,1],[0,0,0],[-1,-2,-1]])**2 + convolve(image, [[1,0,-1],[2,0,-2],[1,0,-1]])**2
+                resp = apply_sobel_kernel(image)
         else:
             log.error('Function name: \'{}\' is unknown!'.format(args['--function']))
             sys.exit(1)
