@@ -15,14 +15,21 @@ from pkg_resources import resource_filename
 from os.path import join
 import logging
 
-from re import split
+import re
 
 from sqlalchemy.exc import OperationalError, InternalError
 from hashlib import sha1
 import shutil
 
 from .transmission import transmission_spheric
-from .skycoords import ho2eq, horizontal2image, equatorial2horizontal, eq2ho, obs_setup, degDist
+from .skycoords import (
+    ho2eq,
+    horizontal2image,
+    equatorial2horizontal,
+    eq2ho,
+    obs_setup,
+    degDist,
+)
 from .optics import theta2r
 from .plotting import (
     plot_kernel_curve,
@@ -362,7 +369,7 @@ def update_star_position(data, observer, conf, crop, args):
     sunData['x'], sunData['y'] = horizontal2image(sunData['azimuth'], sunData['altitude'], cam=conf['image'])
 
     # remove stars and planets that are withing cropping area
-    res = list(map(int, split('\\s*,\\s*', conf['image']['resolution'])))
+    res = list(map(int, re.split('\\s*,\\s*', conf['image']['resolution'])))
     stars.query('0 < x < {} & 0 < y < {}'.format(res[0] ,res[1]), inplace=True)
     planets.query('0 < x < {} & 0 < y < {}'.format(res[0] ,res[1]), inplace=True)
     points_of_interest.query('0 < x < {} & 0 < y < {}'.format(res[0] ,res[1]), inplace=True)
@@ -512,10 +519,10 @@ def get_crop_mask(img, crop):
     disk_mask = np.full((nrows, ncols), False, dtype=bool)
 
     try:
-        x = list(map(int, split('\\s*,\\s*', crop['crop_x'])))
-        y = list(map(int, split('\\s*,\\s*', crop['crop_y'])))
-        r = list(map(int, split('\\s*,\\s*', crop['crop_radius'])))
-        inside = list(map(int, split('\\s*,\\s*', crop['crop_deleteinside'])))
+        x = list(map(int, re.split('\\s*,\\s*', crop['crop_x'])))
+        y = list(map(int, re.split('\\s*,\\s*', crop['crop_y'])))
+        r = list(map(int, re.split('\\s*,\\s*', crop['crop_radius'])))
+        inside = list(map(int, re.split('\\s*,\\s*', crop['crop_deleteinside'])))
         for x, y, r, inside in zip(x, y, r, inside):
             if inside == 0:
                 disk_mask = disk_mask | ((row - y)**2 + (col - x)**2 > r**2)
@@ -812,21 +819,23 @@ def process_image(image, timestamp, data, configs, args, kernel_function):
         resp[crop_mask] = np.NaN
         response = resp
 
-
-        # to correct abberation the max filter response withing tolerance distance around a star will be chosen as 'real' star position
-        # there should be no need for this to be bigger than the diameter of the bigger stars because this means that the transformation we use is quite bad
+        # to correct abberation the max filter response within tolerance distance
+        # around a star will be chosen as 'real' star position
+        # there should be no need for this to be bigger than the diameter
+        # of the bigger stars because this means that the
+        # transformation we use is quite bad
         # and a bright star next to the real star might be detected by error
         tolerance = int(config['analysis']['pixelTolerance'])
         log.debug('Calculate Filter response')
 
-        # calculate x and y position where response has its max value (search within 'tolerance' range)
+        # calculate x and y position where response
+        # has its max value (search within 'tolerance' range)
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             stars = pd.concat([
                 stars.drop(['maxX', 'maxY'], errors='ignore', axis=1),
-                stars.apply(lambda s : findLocalMaxPos(resp, s.x, s.y, tolerance), axis=1)],
-                axis=1
-            )
+                stars.apply(lambda s: findLocalMaxPos(resp, s.x, s.y, tolerance), axis=1)
+            ], axis=1)
 
         # drop stars that got mistaken for a brighter neighboor
         stars = stars.sort_values('vmag').drop_duplicates(subset=['maxX', 'maxY'], keep='first')
@@ -835,33 +844,39 @@ def process_image(image, timestamp, data, configs, args, kernel_function):
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             stars['response'] = stars.apply(lambda s : findLocalMaxValue(resp, s.x, s.y, tolerance), axis=1)
+
         # stars['response_mean'] = stars.apply(lambda s : findLocalMean(image, s.x, s.y, 50), axis=1)
         # stars['response_std'] = stars.apply(lambda s : findLocalStd(img, s.x, s.y, 50), axis=1)
         stars.query('response > 1e-100', inplace=True)
 
         # correct atmospherice absorbtion
         stars['response_orig'] = stars.response
-        stars['response'] = stars.response / transmission_spheric(stars.altitude, 1.0, float(config['calibration']['airmass_absorbtion']))
+        stars['response'] /= transmission_spheric(
+            stars.altitude, 1.0, float(config['calibration']['airmass_absorbtion'])
+        )
 
         if args['--function'] == 'All' or args['--ratescan']:
             stars['response_grad'] = stars.apply(lambda s : findLocalMaxValue(grad, s.x, s.y, tolerance), axis=1)
             stars['response_sobel'] = stars.apply(lambda s : findLocalMaxValue(sobel, s.x, s.y, tolerance), axis=1)
-        ulim, llim = (list(map(float, split('\\s*,\\s*', config['analysis']['visibleupperlimit']))),
-                list(map(float, split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))))
+
+        ulim, llim = (
+            list(map(float, re.split('\\s*,\\s*', config['analysis']['visibleupperlimit']))),
+            list(map(float, re.split('\\s*,\\s*', config['analysis']['visiblelowerlimit']))),
+        )
 
         # offset of upper limit can be reduced if moonlight reduces exposure time
         if not args['--moon'] and np.rad2deg(moon.alt) > 10.0:
-            ulim[1]=ulim[1] - np.log10(float(config['analysis']['moonExposureFactor']))
+            ulim[1] = ulim[1] - np.log10(float(config['analysis']['moonExposureFactor']))
 
         # remove stars for all magnitudes where upperLimit < lowerLimit
         if ulim[0] != llim[0]:
             intersection = (llim[1] - ulim[1]) / (ulim[0] - llim[0])
             if ulim[0] < llim[0]:
                 data['vmagLimit'] = min(intersection, data['vmagLimit'])
-                #stars.loc[stars.vmag.values > data['vmagLimit'], 'visible'] = 0
+                # stars.loc[stars.vmag.values > data['vmagLimit'], 'visible'] = 0
                 stars.query('vmag < {}'.format(data['vmagLimit']), inplace=True)
             else:
-                #stars.loc[stars.vmag.values < intersection, 'visible'] = 0
+                # stars.loc[stars.vmag.values < intersection, 'visible'] = 0
                 stars.query('vmag > {}'.format(intersection), inplace=True)
 
         stars['visible'] = calculate_star_visibility(
@@ -943,35 +958,27 @@ def process_image(image, timestamp, data, configs, args, kernel_function):
                 )
             )
 
-
         if args['--ratescan']:
             log.info('Doing ratescan')
-            gradList = list()
-            sobelList = list()
-            logList = list()
 
-            for resp_grad, resp_sobel, resp_log in zip(np.logspace(np.log10(stars.response_grad.min()/5), np.log10(stars.response_grad.max()), 100),
-                        np.logspace(np.log10(stars.response_sobel.min()), np.log10(stars.response_sobel.max()), 100),
-                        np.logspace(np.log10(stars.response_orig.min()), np.log10(stars.response_orig.max()), 100)):
+            ratescan_results = {}
+            kernels = ['grad', 'sobel', 'log']
 
-                _, num_of_clusters = label(grad>resp_grad)
-                size_of_clusters = np.sum(grad>resp_grad)/num_of_clusters
-                perc_of_vis_stars = np.mean(stars.response_grad > resp_grad)
-                gradList.append((resp_grad, num_of_clusters, size_of_clusters, perc_of_vis_stars))
+            for kernel in kernels:
+                results = []
+                response = stars['response_' + kernel]
+                thresholds = np.logspace(response.min(), response.max(), 100)
+                for threshold in thresholds:
+                    _, num_of_clusters = label(grad > threshold)
+                    size_of_clusters = np.sum(grad > threshold) / num_of_clusters
+                    perc_of_vis_stars = np.mean(response > threshold)
+                    results.append((response, num_of_clusters, size_of_clusters, perc_of_vis_stars))
 
-                _, num_of_clusters = label(sobel>resp_sobel)
-                size_of_clusters = np.sum(grad>resp_sobel)/num_of_clusters
-                perc_of_vis_stars = np.mean(stars.response_sobel > resp_sobel)
-                sobelList.append((resp_sobel, num_of_clusters, size_of_clusters, perc_of_vis_stars))
+                ratescan_results[kernel] = np.array(results)
 
-                _, num_of_clusters = label(log>resp_log)
-                size_of_clusters = np.sum(log>resp_log)/num_of_clusters
-                perc_of_vis_stars = np.mean(stars.response_orig > resp_log)
-                logList.append((resp_log, num_of_clusters, size_of_clusters, perc_of_vis_stars))
-
-            gradList = np.array(gradList)
-            sobelList = np.array(sobelList)
-            logList = np.array(logList)
+            gradList = ratescan_results['grad']
+            sobelList = ratescan_results['sobel']
+            logList = ratescan_results['log']
 
             minThresholds = [max(response[l[:, 0] == 1]) for l in (gradList, sobelList, logList)]
 
