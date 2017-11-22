@@ -58,7 +58,7 @@ import requests.exceptions as rex
 from tables import HDF5ExtError
 
 from .. import skycam, cloud_tracker
-from ..io import getImageDict
+from ..io import getImageDict, downloadImg, TooEarlyError
 
 #######################################################
 
@@ -209,16 +209,16 @@ def main():
         # download image(s) from URL
         while 1:
             try:
-                img = skycam.downloadImg(
+                img = downloadImg(
                     config['properties']['url'],
                     timeout=10,
                 )
                 log.debug('Download finished')
-            except skycam.TooEarlyError as e:
+            except TooEarlyError as e:
                 log.info('No new image available. Try again in 30 s.')
                 time.sleep(30)
                 continue
-            except (rex.ConnectionError) as e:
+            except ConnectionError as e:
                 log.error('Download of image failed. Try again in 30 s. {}'.format(e))
                 time.sleep(30)
                 continue
