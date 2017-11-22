@@ -62,10 +62,6 @@ from ..io import getImageDict, downloadImg, TooEarlyError
 #######################################################
 
 
-def wrapper(const_celestialObjects, configList, args, img):
-    return skycam.process_image(getImageDict(img, configList[0]), const_celestialObjects, configList, args)
-
-
 __version__ = pkg_resources.require('starry_night')[0].version
 directory = os.path.join(os.environ['HOME'], '.starry_night')
 if not os.path.exists(directory):
@@ -98,10 +94,7 @@ logging.captureWarnings(True)
 
 
 def main():
-    args = docopt(
-        doc=__doc__,
-        version=__version__,
-    )
+    args = docopt(doc=__doc__, version=__version__)
 
     if 'FACT_PASSWORD' in os.environ:
         passwd = os.environ['FACT_PASSWORD']
@@ -115,12 +108,10 @@ def main():
     if args['--debug']:
         log.info('DEBUG MODE - NOT FOR REGULAR USE')
         log.setLevel(logging.DEBUG)
-        log.debug('started starry_night in debug mode')
-        # print(args)
 
     configList = list()
-
     conf_succ = 0
+
     # try to open config file of package
     path = pkg_resources.resource_filename('starry_night','data/')
     for root, dirs, files in os.walk(path):
@@ -167,15 +158,13 @@ def main():
             log.info('Please enter password'.format(config['SQL']['connection']))
             config['SQL']['connection'] = config['SQL']['connection'].format(getpass())
 
-        for c in configList:
-            c['SQL']['connection'] = config['SQL']['connection']
         try:
             engine = create_engine(config['SQL']['connection'])
             if not engine.execute('SELECT VERSION();'):
                 log.error('SQL connection failed! Aborting')
                 sys.exit(1)
             del engine
-        except (OperationalError,InternalError) as e:
+        except (OperationalError, InternalError) as e:
             log.error(e)
             sys.exit(1)
     if not args['<image>']:
@@ -249,17 +238,22 @@ def main():
         imgCount = len(args['<image>'])
 
         log.info('Processing {} images.'.format(imgCount))
-        par = partial(wrapper, data, configList, args)
+
+        def process_image(img):
+            image_dict = getImageDict(img, configList[0])
+            return skycam.process_image(
+                image_dict, data, configList, args
+            )
 
         # don't use multiprocessing in debug mode
         # process all images and store results
         if args['--debug'] or len(args['<image>']) == 1:
             for img in args['<image>']:
-                results.append(par(img))
+                results.append(process_image(img))
         else:
             threads = np.min([int(args['--threads']), cpu_count()])
             pool = Pool(processes=threads, maxtasksperchild=50)
-            results = pool.map(par, args['<image>'])
+            results = pool.map(process_image, args['<image>'])
             pool.close()
             pool.join()
 
