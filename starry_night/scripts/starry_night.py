@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding: utf-8
 '''
 Usage:
     starry_night -c <confFile> [<image>...] [options]
@@ -10,7 +9,6 @@ Options:
                     If none
     <image>         Image file(s) or folder(s)
     -p <posFile>    File that contains Positions and timestamps to analyse
-    -t Time         Force to use this time and do not parse image name
     -c Camera       Provide a camera config file or use one of these names: 'GTC', 'Magic' or 'CTA'
     -v              Visual output
     -s              Save output to files
@@ -36,8 +34,6 @@ Options:
     --version       Show version.
     --debug         debug it [default: False]
 '''
-
-from __future__ import print_function
 from docopt import docopt
 import pkg_resources
 import logging
@@ -45,36 +41,24 @@ import sys
 import time
 import numpy as np
 import pandas as pd
-import configparser
 import matplotlib.pyplot as plt
-import skimage.filters
-from matplotlib import rc, cm
-from datetime import datetime, timedelta
-from multiprocessing import Pool, cpu_count, set_start_method
-from functools import partial
+from matplotlib import cm
+from datetime import datetime
+from multiprocessing import Pool, cpu_count
 from scipy.optimize import curve_fit
-from re import split, search
+from re import split
 from getpass import getpass
 from sqlalchemy import create_engine
 import os
 
 from sqlalchemy.exc import OperationalError, InternalError
-import requests.exceptions as rex
 from tables import HDF5ExtError
 
-
-from starry_night import skycam, cloud_tracker
-from IPython import embed
+from .. import skycam, cloud_tracker
+from ..io import getImageDict, downloadImg, TooEarlyError
+from ..config import load_config
 
 #######################################################
-
-font = {'size'   : 22}
-rc('font', **font)
-
-
-def wrapper(const_celestialObjects, configList, args, img):
-    return skycam.process_image(skycam.getImageDict(img, configList[0]), const_celestialObjects, configList, args)
-
 
 
 __version__ = pkg_resources.require('starry_night')[0].version
@@ -85,7 +69,7 @@ if not os.path.exists(directory):
 # create handler for file and console output
 logfile_path = os.path.join(
     directory, 'starry_night-{}.log'.format(datetime.utcnow().isoformat())
-    )
+)
 logfile_handler = logging.FileHandler(filename=logfile_path, mode='w')
 logfile_handler.setLevel(logging.ERROR)
 logstream_handler = logging.StreamHandler()
@@ -99,16 +83,18 @@ logstream_handler.setFormatter(formatter)
 
 # setup logging
 logging.basicConfig(
-        handlers = [
-            logfile_handler,
-            logstream_handler,
-            ],
-        level=logging.INFO,
-        )
+    handlers=[
+        logfile_handler,
+        logstream_handler,
+    ],
+    level=logging.INFO,
+)
 logging.captureWarnings(True)
 
 
-def main(args):
+def main():
+    args = docopt(doc=__doc__, version=__version__)
+
     if 'FACT_PASSWORD' in os.environ:
         passwd = os.environ['FACT_PASSWORD']
     else:
@@ -121,47 +107,21 @@ def main(args):
     if args['--debug']:
         log.info('DEBUG MODE - NOT FOR REGULAR USE')
         log.setLevel(logging.DEBUG)
-        log.debug('started starry_night in debug mode')
-        #print(args)
 
-    configList = list()
-
-    conf_succ = 0
-    # try to open config file of package
-    path = pkg_resources.resource_filename('starry_night','data/')
-    for root, dirs, files in os.walk(path):
-        for f in sorted(files):
-            if args['-c'] in f:
-                log.debug('Opening config file: {}'.format(os.path.join(root,f)))
-                configList.append(configparser.RawConfigParser())
-                try:
-                    conf_succ += len(configList[-1].read(os.path.join(root,f)))
-                except UnicodeDecodeError:
-                    log.error('Could not open conf file: {}'.format(os.path.join(root,f)))
-                    configList.pop(-1)
-    # also check if config file was path to a config file somewhere else
-    if conf_succ == 0 and os.path.isfile(args['-c']):
-        log.debug('Parsing config file: {}'.format(args['-c']))
-        configList.append(configparser.RawConfigParser())
-        conf_succ += len(configList[-1].read(args['-c']))
-
-    if conf_succ == 0:
-        configList.clear()
-        log.error('Unable to parse any config file. Does the file exist?')
-        sys.exit(1)
-    del conf_succ
-
+    configList = load_config(args['-c'])
     # use first config file, the other ones are only needed if the camera was moved
     config = configList[0]
 
-    # data is a container for global data and variables which do belong neither to config nor to args.
+    # data is a container for global data
+    # and variables which do belong neither to config nor to args.
     # data will be passed to all threads and is available for the analysis
     log.debug('Parsing Catalogue')
     data = skycam.celObjects_dict(config)
+
     if args['--vmag']:
-        data['vmaglimit'] = args['--vmag']
+        data['vmagLimit'] = args['--vmag']
     else:
-        data['vmaglimit'] = float(config['analysis']['vmaglimit'])
+        data['vmagLimit'] = float(config['analysis']['vmagLimit'])
 
     # prepare everything for sql connection
     if args['--sql']:
@@ -173,15 +133,13 @@ def main(args):
             log.info('Please enter password'.format(config['SQL']['connection']))
             config['SQL']['connection'] = config['SQL']['connection'].format(getpass())
 
-        for c in configList:
-            c['SQL']['connection'] = config['SQL']['connection']
         try:
             engine = create_engine(config['SQL']['connection'])
             if not engine.execute('SELECT VERSION();'):
                 log.error('SQL connection failed! Aborting')
                 sys.exit(1)
             del engine
-        except (OperationalError,InternalError) as e:
+        except (OperationalError, InternalError) as e:
             log.error(e)
             sys.exit(1)
     if not args['<image>']:
@@ -192,8 +150,6 @@ def main(args):
             data['lidarpwd'] = getpass()
     else:
         data['lidarpwd'] = None
-
-
 
     # read positioning file if any
     if args['-p']:
@@ -209,23 +165,26 @@ def main(args):
 
     if not args['<image>']:
         # download image(s) from URL
-        while 1:
+        while True:
             try:
-                img = skycam.downloadImg(
+                image_dict = downloadImg(
                     config['properties']['url'],
                     timeout=10,
                 )
                 log.debug('Download finished')
-            except skycam.TooEarlyError as e:
+            except TooEarlyError as e:
                 log.info('No new image available. Try again in 30 s.')
                 time.sleep(30)
                 continue
-            except (rex.ConnectionError) as e:
+            except ConnectionError as e:
                 log.error('Download of image failed. Try again in 30 s. {}'.format(e))
                 time.sleep(30)
                 continue
 
-            results.append(skycam.process_image(img, data, configList, args))
+            results.append(skycam.process_image(
+                image_dict['img'], image_dict['timestamp'], data, configList, args, args['--function']
+            ))
+
             if not args['--daemon']:
                 log.info('Do not download any more images because option --daemon is not set')
                 break
@@ -234,60 +193,64 @@ def main(args):
         # use image(s) provided by the user and search for directories
         # remove entries that are no valid files
         log.info('Parsing file list. This might take a minute...')
+
         i = 0
         while len(args['<image>']) > i:
-            if (i+1)%2000 == 0:
-                print('Prepared {} images of {}'.format(i+1, len(args['<image>'])))
+            if (i + 1) % 2000 == 0:
+                print('Prepared {} images of {}'.format(i + 1, len(args['<image>'])))
+
             # expand content of directories
             if os.path.isdir(args['<image>'][i]):
                 _dir = args['<image>'].pop(i)
                 for root, dirs, files in os.walk(_dir):
                     for f in files:
-                        args['<image>'].append(os.path.join(root,f))
+                        args['<image>'].append(os.path.join(root, f))
             else:
                 # remove invalid files
                 if os.path.isfile(args['<image>'][i]):
                     i += 1
                 else:
                     args['<image>'].pop(i)
-
-        # no multiprocessing if only a single image was found
-        if len(args['<image>']) == 1:
-            if args['-t'] is not None:
-                images['timestamp'] = datetime(args['-t'])
         imgCount = len(args['<image>'])
 
         log.info('Processing {} images.'.format(imgCount))
-        par = partial(wrapper, data, configList, args)
+
+        def process_image(img):
+            image_dict = getImageDict(img, configList[0])
+            return skycam.process_image(
+                image_dict['img'], image_dict['timestamp'], data, configList, args, args['--function']
+            )
 
         # don't use multiprocessing in debug mode
         # process all images and store results
-        if args['--debug']:
+        if args['--debug'] or len(args['<image>']) == 1:
             for img in args['<image>']:
-                results.append(par(img))
+                results.append(process_image(img))
         else:
             threads = np.min([int(args['--threads']), cpu_count()])
             pool = Pool(processes=threads, maxtasksperchild=50)
-            results = pool.map(par, args['<image>'])
+            results = pool.map(process_image, args['<image>'])
             pool.close()
             pool.join()
 
     # drop all empty dictionaries (image processing was aborted because of high sun)
     # and merge the remaining files
-    i=0
-    while i<len(results):
+    i = 0
+    while i < len(results):
         if not results[i]:
             results.pop(i)
         else:
-            i+=1
+            i += 1
 
     imgCount = len(results)
     log.info('{} images were processed successfully.'.format(imgCount))
 
-
     #####################################################
-
     # no more processing if only a few images were processed successfully
+    if len(args['<image>']) == 1:
+        log.info('Done')
+        sys.exit(0)
+
     if len(results) <= 5:
         log.info('Stop because only {} image(s) were processed. And we don\'t have enough data for further steps.'.format(len(results)))
         sys.exit(0)
@@ -301,10 +264,9 @@ def main(args):
     if args['--cloudtrack']:
         cloudmap_list = list(map(lambda x: x['cloudmap'], results)), timestamp_list
 
-
-    #df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
+    # df = pd.concat(star_list, keys=timestamp_list, names=['date','HIP'])
     df = pd.concat(star_list)
-    df = df.groupby('HIP').filter(lambda x : len(x.index) > 5)
+    df = df.groupby('HIP').filter(lambda x: len(x.index) > 5)
     mean = df.groupby('HIP').mean()
     std = df.groupby('HIP').std()
 
@@ -313,10 +275,6 @@ def main(args):
     del timestamp_list
 
     df.sortlevel(inplace=True)
-    #d.loc[(slice(None), 746), :]
-    #d.loc[(slice(None), 746),:]['response3'].plot.hist(10)
-
-
 
     #####################################################
 
@@ -325,12 +283,14 @@ def main(args):
             gr = df.groupby('HIP')
             res = list()
             for i, stars in gr:
-                res.append(stars.query('response_orig == {}'.format(stars.response_orig.max()))[['HIP','vmag','kernel','response']].values)
+                res.append(
+                    stars.query(
+                        'response_orig == {}'.format(stars.response_orig.max())
+                    )[['HIP', 'vmag', 'kernel', 'response']].values
+                )
             b = np.array(res)
-            plt.plot(b[:,0,0],b[:,0,2])
+            plt.plot(b[:, 0, 0], b[:, 0, 2])
             plt.show()
-
-
 
     if args['--airmass']:
         r = []
@@ -532,8 +492,6 @@ def main(args):
         plt.close('all')
 
     if args['--cloudtrack']:
-        embed()
-        sys.exit(1)
         ct = cloud_tracker.CloudTracker(config)
         for cmap,timestamp in zip(cloudmap_list[0], cloudmap_list[1]):
             ct.update(cmap,timestamp)
@@ -547,7 +505,7 @@ def main(args):
         return 10**(m*x+b)
 
     sys.exit(0)
-    fit_stars = df.query('0 < vmag < {}'.format(float(data['vmaglimit'])))
+    fit_stars = df.query('0 < vmag < {}'.format(float(data['vmagLimit'])))
     popt, pcov = curve_fit(logf, fit_stars.vmag.values, fit_stars.response.values, sigma=1/fit_stars.vmag.values, p0=(-0.2, 2))
     x = np.linspace(-3+fit_stars.vmag.min(), fit_stars.vmag.max(), 20)
     y = logf(x, popt[0], popt[1]-0.3)
@@ -572,19 +530,8 @@ def main(args):
     '''
 
 
-
-''' Main Loop '''
 if __name__ == '__main__':
-    args = docopt(
-        doc=__doc__,
-        version=__version__,
-        )
     try:
-        main(args)
+        main()
     except (KeyboardInterrupt, SystemExit) as e:
-        if len(e.args) == 0 or e.args[0] == 0:
-            logging.getLogger('starry_night').info('Exit')
-        else:
-            logging.getLogger('starry_night').info('Shutdown due to error!')
-    except:
-        raise
+        logging.getLogger('starry_night').info('Exit')

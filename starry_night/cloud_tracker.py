@@ -1,10 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import logging
-from skimage.segmentation import active_contour
-from IPython import embed
-from starry_night.skycam import r2theta, theta2r
-from starry_night import skycam
+from .optics import theta2r
+from . import skycam
 
 class Cloud:
     def __init__(self, _id):
@@ -67,7 +65,7 @@ class CloudTracker:
         self.pred_map = [None, None, ]
         self.wind_direction = [None, ]
         self.wind_speed = [None, ]
-        
+
 
     def __transform_map(self, cloudmap):
         '''
@@ -144,7 +142,6 @@ class CloudTracker:
                 ax1.legend(loc='upper right')
             ax2 = fig.add_subplot(122)
             if self.pred_map[cnt] != None:
-                pred = self.pred_map[cnt]
                 ax2.imshow(self.pred_map[cnt], vmin=0, vmax=1)
             else:
                 ax2.imshow(np.ones(self.maps[0].shape), vmin=0, vmax=1)
@@ -157,10 +154,9 @@ class CloudTracker:
             ax2.set_ylabel(self.timestamps[cnt].isoformat().replace('T', ' '), rotation=90, labelpad=10)
             #plt.title('Current image - previous image shifted')
             fig.tight_layout(h_pad=-0.05)
-            plt.savefig('cloud_movement_{}.png'.format(self.timestamps[cnt].isoformat()),  bbox_inches='tight',) 
+            plt.savefig('cloud_movement_{}.png'.format(self.timestamps[cnt].isoformat()),  bbox_inches='tight',)
             #plt.show()
         plt.close('all')
-        embed()
 
     def predict_next_cloudmap(self, wind_x, wind_y, prev_map):
         '''
@@ -168,10 +164,9 @@ class CloudTracker:
         with values from previous map.
         '''
         shifted_map = self.__shift_and_crop(prev_map, wind_x, wind_y)
-        wind_speed = np.sqrt(wind_x**2+wind_y**2)
-        wind_steps = wind_speed//int(self.config['image']['radius'])
-        #dont fill empty space with previous cloud map because it looks bad
-        #shifted_map[np.isnan(shifted_map)] = prev_map[np.isnan(shifted_map)]
+        wind_speed = np.sqrt(wind_x**2 + wind_y**2)
+        # dont fill empty space with previous cloud map because it looks bad
+        # shifted_map[np.isnan(shifted_map)] = prev_map[np.isnan(shifted_map)]
         self.pred_map.append(shifted_map)
         self.wind_speed.append(wind_speed)
 
@@ -203,8 +198,3 @@ class CloudTracker:
             self.wind_speed.pop(0)
         if (len(self.pred_map) > self.max_maps):
             self.pred_map.pop(0)
-
-
-
-
-
