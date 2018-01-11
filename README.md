@@ -8,7 +8,7 @@
 `starry_night` requires python >= 3.5, we recommend the anaconda distribution as it comes with most requirements preinstalled. 
 
 ```
-pip install git+https://github.com/tudo-astroparticlephysics/starry_night.git
+pip install https://github.com/tudo-astroparticlephysics/starry_night/archive/master.tar.gz
 ```
 
 Basic usage at night: 
