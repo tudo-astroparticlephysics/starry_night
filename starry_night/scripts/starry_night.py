@@ -53,12 +53,24 @@ import os
 
 from sqlalchemy.exc import OperationalError, InternalError
 from tables import HDF5ExtError
+from functools import partial
 
 from .. import skycam, cloud_tracker
 from ..io import getImageDict, downloadImg, TooEarlyError
 from ..config import load_config
 
 #######################################################
+
+
+def process_image(img, configList, data, args):
+    image_dict = getImageDict(img, configList[0])
+    return skycam.process_image(
+        image_dict['img'],
+        image_dict['timestamp'],
+        data,
+        configList,
+        args, args['--function'],
+    )
 
 
 __version__ = pkg_resources.require('starry_night')[0].version
@@ -215,21 +227,19 @@ def main():
 
         log.info('Processing {} images.'.format(imgCount))
 
-        def process_image(img):
-            image_dict = getImageDict(img, configList[0])
-            return skycam.process_image(
-                image_dict['img'], image_dict['timestamp'], data, configList, args, args['--function']
-            )
+        process_current_image = partial(
+            process_image, data=data, configList=configList, args=args
+        )
 
         # don't use multiprocessing in debug mode
         # process all images and store results
         if args['--debug'] or len(args['<image>']) == 1:
             for img in args['<image>']:
-                results.append(process_image(img))
+                results.append(process_current_image(img))
         else:
             threads = np.min([int(args['--threads']), cpu_count()])
             pool = Pool(processes=threads, maxtasksperchild=50)
-            results = pool.map(process_image, args['<image>'])
+            results = pool.map(process_current_image, args['<image>'])
             pool.close()
             pool.join()
 
