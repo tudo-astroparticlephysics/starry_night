@@ -2,9 +2,9 @@ from setuptools import setup, find_packages
 
 setup(
     name='starry_night',
-    version='1.2.0',
+    version='1.3.0',
     description='A tool for detecting clouds in the night sky based on star detection.',
-    url='https://bitbucket.org/solarer/starry_night',
+    url='https://github.com/tudo-astroparticlephysics/starry_night',
     author='Jan Adam',
     author_email='jan.adam@tu-dortmund.de',
     license='MIT',
